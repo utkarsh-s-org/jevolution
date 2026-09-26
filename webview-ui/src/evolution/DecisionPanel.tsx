@@ -116,7 +116,7 @@ export function DecisionPanel({
             </span>
             {!waiting && response && (
               <strong title="Measured API round trip">
-                {response.latencyMs === undefined ? '—' : milliseconds(response.latencyMs)}
+                {response.latencyMs === undefined ? 'N/A' : milliseconds(response.latencyMs)}
               </strong>
             )}
             {waiting && (

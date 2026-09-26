@@ -812,7 +812,7 @@ export default function App() {
               <br />
               Recorded usage estimate:{' '}
               {status?.estimatedCost === null || !status
-                ? '—'
+                ? 'N/A'
                 : `$${status.estimatedCost.toFixed(4)}`}{' '}
               · excludes unreported interrupted calls
             </span>
