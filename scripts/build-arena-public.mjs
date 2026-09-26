@@ -3,7 +3,7 @@ import { copyFileSync, writeFileSync } from 'node:fs';
 
 const result = spawnSync(process.execPath, ['scripts/build-arena.mjs'], {
   stdio: 'inherit',
-  env: { ...process.env, VITE_ARENA_PUBLIC_PREVIEW: 'true' },
+  env: { ...process.env, VITE_ARENA_HOSTED: 'true' },
 });
 if (result.status !== 0) process.exit(result.status || 1);
 copyFileSync('dist/arena/arena.html', 'dist/arena/index.html');

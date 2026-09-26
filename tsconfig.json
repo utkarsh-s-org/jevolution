@@ -15,6 +15,7 @@
 		"noFallthroughCasesInSwitch": true
 	},
 	"include": [
+		"api",
 		"adapters/vscode",
 		"server/src",
 		"core/src"

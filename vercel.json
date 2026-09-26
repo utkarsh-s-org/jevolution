@@ -4,6 +4,9 @@
   "installCommand": "npm ci --no-audit --no-fund",
   "buildCommand": "node scripts/build-arena-public.mjs",
   "outputDirectory": "dist/arena",
+  "functions": {
+    "api/arena/*.ts": { "maxDuration": 30 }
+  },
   "git": {
     "deploymentEnabled": false
   }

@@ -4,6 +4,7 @@ import {
   PROVIDER_KEYS,
   RULES,
 } from '../../../core/src/evolution/constants.js';
+import { ProviderError } from '../../../core/src/evolution/providerError.js';
 import type {
   Decision,
   ModelGroup,
@@ -36,17 +37,7 @@ export const PREDATOR_PREY_WOLF_INSTRUCTIONS = [
   'Signals are not supported; choose none. Do not provide a written explanation.',
 ].join(' ');
 
-export class ProviderError extends Error {
-  nativeResponse?: NativeDecisionResponse;
-  latencyMs?: number;
-  status: number;
-  retryAfterMs: number;
-  constructor(message: string, status = 0, retryAfterMs = 0) {
-    super(message);
-    this.status = status;
-    this.retryAfterMs = retryAfterMs;
-  }
-}
+export { ProviderError } from '../../../core/src/evolution/providerError.js';
 export function defaultGroups(): ModelGroup[] {
   return DEFAULT_GROUPS.map((g) => ({
     ...g,
