@@ -1,4 +1,4 @@
-import { DEFAULT_GROUPS, RULES, validateGroups } from '../../../core/src/evolution/constants.js';
+import { DEFAULT_GROUPS, DEFAULT_SEED, RULES } from '../../../core/src/evolution/constants.js';
 import { ProviderError } from '../../../core/src/evolution/providerError.js';
 import { SimulationRuntime } from '../../../core/src/evolution/runtime.js';
 import type { ModelGroup, Provider, Result, RunConfig } from '../../../core/src/evolution/types.js';
@@ -17,6 +17,7 @@ const storage = new HostedStorage();
 const runtime = new SimulationRuntime({
   id: () => crypto.randomUUID(),
   defaultGroups: () => groups,
+  jevModel: () => groups.find((group) => group.provider === 'typesafe')?.model,
   modelDefaults: { jev: 'jev-1.13.0', claude: 'claude-haiku-4-5-20251001' },
   providerReadiness: () => ready,
   createReplay: (runId) => new HostedReplay(storage, runId),
@@ -65,7 +66,7 @@ async function refresh() {
     : { typesafe: false, anthropic: false, openai: false, google: false };
   groups = session.groups;
   if (!initialized) {
-    runtime.world.groups = validateGroups(groups);
+    runtime.reset(DEFAULT_SEED, runtime.config, groups);
     initialized = true;
   }
   runtime.reason = authenticated
