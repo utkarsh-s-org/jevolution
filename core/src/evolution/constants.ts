@@ -1,6 +1,7 @@
 import type { Genes, ModelGroup, Provider, RunConfig, Scenario, Species, World } from './types.js';
 
 export const GRID = 64;
+export const DEFAULT_SEED = 8675309;
 export const INITIAL_PER_LINEAGE = 40;
 export const MAX_POPULATION = 180;
 export const GENE_NAMES = ['speed', 'vigilance', 'thrift', 'fertility', 'sociability'] as const;
