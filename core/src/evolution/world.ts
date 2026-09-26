@@ -1,5 +1,6 @@
 import {
   DEFAULT_GROUPS,
+  DEFAULT_SEED,
   GENE_NAMES,
   GRID,
   PREDATOR_PREY_BUDGET,
@@ -400,7 +401,7 @@ function populateFood(world: World) {
 }
 
 export function createWorld(
-  seed = 271828,
+  seed = DEFAULT_SEED,
   roster: ModelGroup[] = DEFAULT_GROUPS,
   scenario: Scenario = 'arena',
 ): World {

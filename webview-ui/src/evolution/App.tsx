@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_CONFIG,
   DEFAULT_GROUPS,
+  DEFAULT_SEED,
   GRID,
   PREDATOR_PREY_GROUPS,
   PROVIDER_KEYS,
@@ -83,7 +84,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [config, setConfig] = useState<RunConfig>({ ...DEFAULT_CONFIG });
-  const [seed, setSeed] = useState(271828);
+  const [seed, setSeed] = useState(DEFAULT_SEED);
   const canvas = useRef<HTMLCanvasElement>(null);
   const latest = useRef<Snapshot | null>(null);
   latest.current = editor.preview || replay.shown;
@@ -317,7 +318,7 @@ export default function App() {
                 experimentPreview:
                   liveStatus?.config.experimentPreview ?? defaultExperimentPreview(),
               });
-              setSeed(snapshot?.world.seed || 271828);
+              setSeed(snapshot?.world.seed || DEFAULT_SEED);
               setGroupsDraft(snapshot?.world.groups || DEFAULT_GROUPS);
               setShowSettings(true);
             }}
