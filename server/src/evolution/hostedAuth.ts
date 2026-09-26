@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const COOKIE = 'jevolution_session';
-const TTL_SECONDS = 12 * 60 * 60;
+const TTL_SECONDS = 60 * 60;
 function equal(a: string, b: string) {
   const left = Buffer.from(a),
     right = Buffer.from(b);
@@ -39,6 +39,9 @@ export function authenticated(request: Request) {
 export function sessionCookie() {
   const expiration = String(Math.floor(Date.now() / 1000) + TTL_SECONDS);
   return `${COOKIE}=${expiration}.${signature(expiration)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${TTL_SECONDS}`;
+}
+export function clearSessionCookie() {
+  return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
 }
 export function sameOrigin(request: Request) {
   const origin = request.headers.get('origin');

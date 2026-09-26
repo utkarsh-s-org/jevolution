@@ -31,6 +31,7 @@ import { PopulationChart } from './PopulationChart.js';
 import { RabbitDistributions } from './RabbitDistributions.js';
 import { ReliefPanel } from './ReliefPanel.js';
 import { attachRenderer } from './renderer.js';
+import { RunAccessDialog } from './RunAccessDialog.js';
 import { useArenaFullscreen } from './useArenaFullscreen.js';
 import { useMapEditor } from './useMapEditor.js';
 import { useReplay } from './useReplay.js';
@@ -44,7 +45,6 @@ const time = (seconds: number) =>
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [showAccess, setShowAccess] = useState(false);
-  const [accessCode, setAccessCode] = useState('');
   const replay = useReplay(snapshot);
   const editor = useMapEditor(snapshot, replay.reviewing, setSnapshot);
   const editing = useRef(editor);
@@ -455,52 +455,49 @@ export default function App() {
         </nav>
         <div className="top-meta">
           <span className={`connection-dot ${connected ? 'connected' : ''}`} />
-          {connected ? (HOSTED ? 'LIVE ENGINE' : 'LOCAL SERVER') : 'CONNECTING'}
+          {connected
+            ? HOSTED
+              ? hostedClient().authenticated
+                ? 'UNLOCKED'
+                : 'PUBLIC DEMO'
+              : 'LOCAL SERVER'
+            : 'CONNECTING'}
+          {HOSTED && (
+            <button
+              className="secondary-button session-button"
+              disabled={busy || !connected}
+              onClick={async () => {
+                if (!hostedClient().authenticated) {
+                  setShowAccess(true);
+                  return;
+                }
+                setBusy(true);
+                try {
+                  await hostedClient().request('pause', { reason: 'Simulation locked.' });
+                  const response = await fetch('/api/arena/session', { method: 'DELETE' });
+                  if (!response.ok) throw new Error('Could not lock this session. Try again.');
+                  await hostedClient().request('refresh');
+                } catch (error) {
+                  setError(error instanceof Error ? error.message : 'Could not lock session.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {hostedClient().authenticated ? 'Lock' : 'Unlock'}
+            </button>
+          )}
         </div>
       </header>
       <main className={view === 'habitat' ? 'habitat-main' : undefined}>
         {showAccess && (
-          <form
-            className="run-access"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setBusy(true);
-              setError('');
-              void fetch('/api/arena/session', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ code: accessCode }),
-              })
-                .then(async (response) => {
-                  const data = await response.json();
-                  if (!response.ok) throw new Error(data.error || 'Could not unlock simulation');
-                  setAccessCode('');
-                  setShowAccess(false);
-                  await hostedClient().request('refresh');
-                })
-                .catch((error: Error) => setError(error.message))
-                .finally(() => setBusy(false));
+          <RunAccessDialog
+            onClose={() => setShowAccess(false)}
+            onUnlock={async () => {
+              await hostedClient().request('refresh');
+              setShowAccess(false);
             }}
-          >
-            <label htmlFor="run-access-code">Run access code</label>
-            <input
-              id="run-access-code"
-              type="password"
-              autoComplete="current-password"
-              value={accessCode}
-              onChange={(event) => setAccessCode(event.target.value)}
-              required
-            />
-            <button className="primary-button" disabled={busy}>
-              Unlock simulation
-            </button>
-            <button type="button" className="secondary-button" onClick={() => setShowAccess(false)}>
-              Cancel
-            </button>
-            <small>
-              Protects the configured model API credits. Each browser runs its own ecosystem.
-            </small>
-          </form>
+          />
         )}
         {view !== 'habitat' && populationSummary}
         {error && (

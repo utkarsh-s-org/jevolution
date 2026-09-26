@@ -7,7 +7,7 @@ export default {
   async fetch(request: Request) {
     if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
     if (!sameOrigin(request) || !authenticated(request))
-      return json({ error: 'Unlock the simulation with your run access code.' }, 401);
+      return json({ error: 'Enter the run password to unlock the simulation.' }, 401);
     if (!request.headers.get('content-type')?.startsWith('application/json'))
       return json({ error: 'JSON required' }, 415);
     const text = await request.text();
