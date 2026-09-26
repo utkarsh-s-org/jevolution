@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "./dist/arena-server", "rootDir": ".", "sourceMap": true },
+  "include": ["server/src/evolution/**/*.ts", "core/src/evolution/**/*.ts"],
+  "exclude": ["**/*.test.ts"]
+}

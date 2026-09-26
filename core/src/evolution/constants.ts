@@ -1,0 +1,268 @@
+import type { Genes, ModelGroup, Provider, RunConfig, Species } from './types.js';
+
+export const GRID = 64;
+export const INITIAL_PER_LINEAGE = 40;
+export const MAX_POPULATION = 180;
+export const GENE_NAMES = ['speed', 'vigilance', 'thrift', 'fertility', 'sociability'] as const;
+export const DEFAULT_CONFIG: RunConfig = {
+  deadlineMs: 2500,
+  decisionIntervalMs: 100,
+  maxInFlight: 4,
+  timing: 'realtime',
+  equalizedMs: 3000,
+  maxRequests: 20000,
+  maxSeconds: 600,
+};
+export const RULES = {
+  tickMs: 50,
+  snapshotMs: 200,
+  historySeconds: 2,
+  historyLimit: 1200,
+  eventLimit: 60,
+  foodCapacity: 6,
+  cargoCapacity: 4,
+  cacheCapacity: 32,
+  shareRange: 1.5,
+  hungryEnergy: 55,
+  urgentEnergy: 25,
+  helpCooldown: 6,
+  reliefEventLimit: 160,
+  droughtWither: 0.025,
+  foodRegrowth: 0.03,
+  droughtRegrowth: 0.0064,
+  baseMetabolism: 0.3,
+  restMetabolism: 1,
+  visionMetabolism: 0.06,
+  speedMetabolism: 0.05,
+  baseSpeed: 1.05,
+  speedGain: 0.65,
+  movementCost: 0.1,
+  thirst: 0.15,
+  droughtThirst: 0.22,
+  drinkRate: 16,
+  eatRate: 1.4,
+  forageBout: 2,
+  foodEnergy: 4,
+  maturity: 25,
+  founderEnergy: 75,
+  founderWater: 90,
+  childEnergy: 65,
+  childWater: 80,
+  breedEnergy: 62,
+  breedWater: 35,
+  breedCost: 25,
+  breedCooldown: 25,
+  lifespan: 340,
+  mutation: 0.065,
+  mateDistance: 1.7,
+  wolfCount: 10,
+  wolfPopulationCap: 32,
+  wolfFounderEnergy: 60,
+  wolfChildEnergy: 35,
+  wolfMetabolism: 0.6,
+  wolfMovementCost: 0.1,
+  wolfMealEnergy: 45,
+  wolfMaturity: 30,
+  wolfLifespan: 240,
+  wolfBreedEnergy: 95,
+  wolfBreedCost: 50,
+  wolfBreedCooldown: 45,
+  wolfSpeed: 1.55,
+  wolfSight: 10,
+  wolfEatCooldown: 18,
+  wolfCapture: 0.6,
+  signalDelay: 0.2,
+  signalLife: 6,
+  signalCost: 0.6,
+  forestSpeed: 0.77,
+  shelteredWolfRange: 2,
+  maxSignalHistory: 200,
+  memoryLimit: { food: 4, water: 2, danger: 4 },
+  memoryLife: { food: 120, water: 180, danger: 20 },
+  followReplan: 0.65,
+} as const;
+export const POPULATION_BUDGET: Record<Species, number> = { rabbit: 80, wolf: RULES.wolfCount };
+export const TRAIT_INFO: Record<keyof Genes, { label: string; benefit: string; cost: string }> = {
+  speed: {
+    label: 'Speed',
+    benefit: 'Faster movement and escape',
+    cost: 'Higher resting and movement energy use',
+  },
+  vigilance: {
+    label: 'Vigilance',
+    benefit: 'Wider local vision',
+    cost: 'Higher resting energy use',
+  },
+  thrift: {
+    label: 'Thrift',
+    benefit: 'Lower resting metabolism',
+    cost: 'Slower movement and food intake',
+  },
+  fertility: {
+    label: 'Fertility',
+    benefit: 'Shorter reproduction cooldown',
+    cost: 'Higher energy cost per offspring',
+  },
+  sociability: {
+    label: 'Sociability',
+    benefit: 'Longer local signal range',
+    cost: 'More energy per signal',
+  },
+};
+
+export const PROVIDER_KEYS: Record<Provider, string> = {
+  typesafe: 'TYPESAFE_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  google: 'GEMINI_API_KEY',
+};
+export const DEFAULT_GROUPS: ModelGroup[] = [
+  {
+    id: 'jev',
+    species: 'rabbit',
+    controller: 'model',
+    population: 40,
+    label: 'Jev',
+    provider: 'typesafe',
+    model: 'jev-1.13.0',
+    color: 0,
+    delayMs: 0,
+  },
+  {
+    id: 'claude',
+    species: 'rabbit',
+    controller: 'model',
+    population: 40,
+    label: 'Claude Haiku',
+    provider: 'anthropic',
+    model: 'claude-haiku-4-5-20251001',
+    color: 1,
+    delayMs: 0,
+  },
+  {
+    id: 'wolves',
+    wolfLifeCycle: 'dynamic',
+    species: 'wolf',
+    controller: 'deterministic',
+    population: POPULATION_BUDGET.wolf,
+    label: 'Deterministic wolves',
+    provider: 'typesafe',
+    model: 'jev-1.13.0',
+    color: 2,
+    delayMs: 0,
+  },
+];
+export const MODEL_PRESETS: { label: string; provider: Provider; model: string }[] = [
+  ...DEFAULT_GROUPS.filter((g) => g.species !== 'wolf').map(({ label, provider, model }) => ({
+    label,
+    provider,
+    model,
+  })),
+  { label: 'Claude Sonnet 4.6', provider: 'anthropic', model: 'claude-sonnet-4-6' },
+  { label: 'GPT-5.6 Luna', provider: 'openai', model: 'gpt-5.6-luna' },
+  { label: 'Gemini 3.8 Flash', provider: 'google', model: 'gemini-3.8-flash' },
+];
+// Adding a group redistributes its species budget instead of adding predator pressure.
+export function balancePopulations(
+  groups: ModelGroup[],
+  fixedId?: string,
+  count?: number,
+  onlySpecies?: Species,
+): ModelGroup[] {
+  const changed = groups.find((g) => g.id === fixedId);
+  const affected = onlySpecies ?? (changed ? changed.species || 'rabbit' : undefined);
+  return groups.map((g) => {
+    const species = g.species || 'rabbit';
+    if (affected && species !== affected) return g;
+    const peers = groups.filter((p) => (p.species || 'rabbit') === species);
+    const fixed = peers.find((p) => p.id === fixedId);
+    const budget = POPULATION_BUDGET[species];
+    const reserved =
+      fixed && count !== undefined
+        ? Math.max(1, Math.min(budget - peers.length + 1, Math.trunc(count) || 1))
+        : undefined;
+    if (reserved !== undefined && g.id === fixedId) return { ...g, population: reserved };
+    const others = reserved === undefined ? peers : peers.filter((p) => p.id !== fixedId);
+    const remaining = budget - (reserved || 0);
+    const index = others.findIndex((p) => p.id === g.id);
+    return {
+      ...g,
+      population:
+        Math.floor(remaining / others.length) + (index < remaining % others.length ? 1 : 0),
+    };
+  });
+}
+// Validate a fresh roster before changing any running-world state. Return only known fields.
+export function validateGroups(input: unknown): ModelGroup[] {
+  if (!Array.isArray(input) || input.length < 1 || input.length > 6)
+    throw new Error('Choose 1–6 animal groups.');
+  const ids = new Set<string>();
+  const colors = new Set<number>();
+  const groups = input.map((value) => {
+    if (!value || typeof value !== 'object') throw new Error('Invalid model group.');
+    const g = value as ModelGroup;
+    const species = g.species ?? 'rabbit';
+    const controller = g.controller ?? 'model';
+    if (g.wolfLifeCycle !== undefined && !['dynamic', 'fixed'].includes(g.wolfLifeCycle))
+      throw new Error('Unknown wolf life cycle.');
+    if (!['rabbit', 'wolf'].includes(species)) throw new Error('Unknown species.');
+    if (
+      !['model', 'deterministic'].includes(controller) ||
+      (species === 'rabbit' && controller !== 'model')
+    )
+      throw new Error('Deterministic control is only available for wolves.');
+    if (
+      typeof g.id !== 'string' ||
+      !/^[a-z][a-z0-9_-]{0,31}$/.test(g.id) ||
+      ['constructor', 'prototype', '__proto__'].includes(g.id) ||
+      ids.has(g.id)
+    )
+      throw new Error('Group IDs must be unique, short identifiers.');
+    if (typeof g.label !== 'string' || !g.label.trim() || g.label.length > 40)
+      throw new Error('Group name must be 1–40 characters.');
+    if (!Object.hasOwn(PROVIDER_KEYS, g.provider)) throw new Error('Unknown model provider.');
+    if (typeof g.model !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(g.model))
+      throw new Error('Enter a valid model ID.');
+    if (!Number.isInteger(g.color) || g.color < 0 || g.color > 5 || colors.has(g.color))
+      throw new Error('Choose a different animal color for each group.');
+    if (!Number.isInteger(g.delayMs) || g.delayMs < 0 || g.delayMs > 5000)
+      throw new Error('Added delay must be 0–5000 ms.');
+    ids.add(g.id);
+    colors.add(g.color);
+    return {
+      id: g.id,
+      label: g.label.trim(),
+      provider: g.provider,
+      model: g.model,
+      color: g.color,
+      delayMs: controller === 'deterministic' ? 0 : g.delayMs,
+      species,
+      controller,
+      population: g.population,
+      ...(species === 'wolf' ? { wolfLifeCycle: g.wolfLifeCycle ?? ('dynamic' as const) } : {}),
+    };
+  });
+  if (!groups.some((g) => g.species === 'rabbit'))
+    throw new Error('Keep at least one rabbit group.');
+  const defaults = balancePopulations(groups);
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    g.population ??= defaults[i].population;
+    if (
+      !Number.isInteger(g.population) ||
+      g.population! < 1 ||
+      g.population! > POPULATION_BUDGET[g.species]
+    )
+      throw new Error('Each group needs a positive starting population within its species budget.');
+  }
+  for (const species of ['rabbit', 'wolf'] as const) {
+    if (
+      groups.filter((g) => g.species === species).reduce((sum, g) => sum + g.population!, 0) >
+      POPULATION_BUDGET[species]
+    )
+      throw new Error(
+        `Starting ${species} population exceeds the ${POPULATION_BUDGET[species]}-animal budget.`,
+      );
+  }
+  return groups;
+}
