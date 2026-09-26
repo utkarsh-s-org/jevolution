@@ -192,8 +192,8 @@ export function ModelSettings({
                               update(i, { wolfLifeCycle: e.target.value as 'dynamic' | 'fixed' })
                             }
                           >
-                            <option value="dynamic">Enabled — mating, hunger, aging</option>
-                            <option value="fixed">Disabled — immortal, no offspring</option>
+                            <option value="dynamic">Enabled: mating, hunger, aging</option>
+                            <option value="fixed">Disabled: immortal, no offspring</option>
                           </select>
                         </label>
                       )}

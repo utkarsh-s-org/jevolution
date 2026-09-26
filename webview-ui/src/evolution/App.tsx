@@ -9,6 +9,7 @@ import {
   PROVIDER_KEYS,
   SCENARIO_CONFIG,
 } from '../../../core/src/evolution/constants.js';
+import { defaultExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
 import type {
   Lineage,
   ModelGroup,
@@ -19,6 +20,7 @@ import type {
 import { groupPopulation } from '../../../core/src/evolution/world.js';
 import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
 import { DecisionPanel } from './DecisionPanel.js';
+import { ExperimentControls } from './ExperimentControls.js';
 import { FieldGuide } from './FieldGuide.js';
 import { InheritedTraits, LatencyPanel, PopulationOutcomes } from './GroupPanels.js';
 import { arenaRequest, HOSTED, hostedClient } from './hostedClient.js';
@@ -311,7 +313,11 @@ export default function App() {
             aria-label="Open run settings"
             disabled={editor.open}
             onClick={() => {
-              setConfig(liveStatus?.config || DEFAULT_CONFIG);
+              setConfig({
+                ...(liveStatus?.config || DEFAULT_CONFIG),
+                experimentPreview:
+                  liveStatus?.config.experimentPreview ?? defaultExperimentPreview(),
+              });
               setSeed(snapshot?.world.seed || DEFAULT_SEED);
               setGroupsDraft(snapshot?.world.groups || DEFAULT_GROUPS);
               setShowSettings(true);
@@ -813,7 +819,7 @@ export default function App() {
               <br />
               Recorded usage estimate:{' '}
               {status?.estimatedCost === null || !status
-                ? '—'
+                ? 'N/A'
                 : `$${status.estimatedCost.toFixed(4)}`}{' '}
               · excludes unreported interrupted calls
             </span>
@@ -880,7 +886,10 @@ export default function App() {
                 onChange={(e) => {
                   const next = e.target.value as Scenario;
                   // Each scenario starts from its own defaults; the arena keeps its roster.
-                  setConfig({ ...SCENARIO_CONFIG[next] });
+                  setConfig({
+                    ...SCENARIO_CONFIG[next],
+                    experimentPreview: config.experimentPreview,
+                  });
                   setGroupsDraft(
                     next === 'predatorPrey'
                       ? PREDATOR_PREY_GROUPS
@@ -908,6 +917,11 @@ export default function App() {
                 ready={liveStatus?.providerReady}
               />
             )}
+            <ExperimentControls
+              value={config.experimentPreview}
+              disabled={!!liveStatus?.running || busy}
+              onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
+            />
             <div className="settings-grid">
               <div className="seed-setting">
                 <label htmlFor="habitat-seed">Habitat seed</label>

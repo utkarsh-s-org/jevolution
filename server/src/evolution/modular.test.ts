@@ -12,6 +12,10 @@ import {
   PROVIDER_KEYS,
   validateGroups,
 } from '../../../core/src/evolution/constants.js';
+import {
+  defaultExperimentPreview,
+  validateExperimentPreview,
+} from '../../../core/src/evolution/experimentPreview.js';
 import { applyDecision, observe, stepWorld } from '../../../core/src/evolution/simulation.js';
 import type { ModelGroup, Provider, Snapshot } from '../../../core/src/evolution/types.js';
 import { createWorld } from '../../../core/src/evolution/world.js';
@@ -27,6 +31,38 @@ function roster(n: number): ModelGroup[] {
     delayMs: 0,
   }));
 }
+test('preview controls survive snapshots and replay without changing the seeded world or observations', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-preview-'));
+  const runtime = new ArenaRuntime(directory);
+  try {
+    runtime.reset(123, { ...DEFAULT_CONFIG });
+    const baseline = structuredClone(runtime.world);
+    const observation = observe(runtime.world, runtime.world.rabbits[0]);
+    const preview = defaultExperimentPreview();
+    preview.values.temperature = 40;
+    preview.values.messageLoss = 95;
+    runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: preview });
+    assert.deepEqual(runtime.world, baseline);
+    assert.deepEqual(observe(runtime.world, runtime.world.rabbits[0]), observation);
+    assert.deepEqual(runtime.snapshot().status.config.experimentPreview, preview);
+    assert.deepEqual(runtime.replay.get(0).status.config.experimentPreview, preview);
+    assert.equal(runtime.snapshot().world.seed, 123);
+    const runId = runtime.runId;
+    assert.throws(() =>
+      runtime.reset(321, {
+        ...DEFAULT_CONFIG,
+        experimentPreview: { ...preview, appliedToSimulation: true } as never,
+      }),
+    );
+    assert.equal(runtime.runId, runId);
+    assert.throws(() =>
+      validateExperimentPreview({ ...preview, values: { ...preview.values, messageLoss: 101 } }),
+    );
+  } finally {
+    runtime.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 function fixture(provider: Provider, choice = 'rest') {
   const decision = { choice, signal: 'none' };
   if (provider === 'typesafe')

@@ -11,6 +11,7 @@ import {
   RULES,
   validateGroups,
 } from '../../../core/src/evolution/constants.js';
+import { validateExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
 import type { RunConfig } from '../../../core/src/evolution/types.js';
 import { ArenaRuntime } from './runtime.js';
 
@@ -49,6 +50,7 @@ function configFrom(input: Record<string, unknown>): RunConfig {
   if (input.scenario !== undefined && !['arena', 'predatorPrey'].includes(String(input.scenario)))
     throw new Error('Invalid scenario.');
   if (input.scenario) next.scenario = input.scenario as RunConfig['scenario'];
+  next.experimentPreview = validateExperimentPreview(input.experimentPreview);
   return next;
 }
 async function main() {
