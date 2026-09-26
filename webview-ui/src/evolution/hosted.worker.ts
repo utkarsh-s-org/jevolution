@@ -33,6 +33,7 @@ const runtime = new SimulationRuntime({
     const data = await response.json();
     if (!response.ok) {
       if (response.status === 401) {
+        runtime.pause('Session expired. Enter the run password again.');
         authenticated = false;
         ready = { typesafe: false, anthropic: false, openai: false, google: false };
       }
@@ -58,6 +59,7 @@ async function refresh() {
     groups: ModelGroup[];
   };
   authenticated = session.authenticated;
+  if (!authenticated && runtime.running) runtime.pause('Simulation locked.');
   ready = session.authenticated
     ? session.ready
     : { typesafe: false, anthropic: false, openai: false, google: false };
@@ -68,7 +70,7 @@ async function refresh() {
   }
   runtime.reason = authenticated
     ? 'Ready. Start to run real model decisions.'
-    : 'Enter your run access code to start model calls.';
+    : 'Public demo. Enter the run password to start model calls.';
   send();
 }
 onmessage = async (event: MessageEvent) => {

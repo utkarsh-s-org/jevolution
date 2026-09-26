@@ -3395,22 +3395,50 @@ select {
     justify-content: end;
   }
 }
-/* Hosted run authorization stays compact and within normal page flow. */
-.run-access {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 16px;
-  margin-bottom: 12px;
-  border: 1px solid #46543e;
-  background: #1b281e;
+/* Password entry uses the browser top layer, above the navbar and fullscreen UI. */
+.run-access-dialog {
+  color: var(--white);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 28px;
+  margin: auto;
 }
-.run-access input {
-  min-width: 160px;
-  flex: 1;
+.run-access-dialog::backdrop {
+  background: rgb(0 0 0 / 70%);
 }
-.run-access small {
+.run-access-dialog form {
+  display: grid;
+  gap: 16px;
+}
+.run-access-dialog h2,
+.run-access-dialog p {
+  margin: 0;
+}
+.run-access-dialog p,
+.run-access-dialog small {
+  color: var(--muted);
+}
+.run-access-dialog input {
   width: 100%;
-  color: #a7b59b;
+  min-width: 0;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--white);
+  border: 1px solid var(--border);
+}
+.run-access-dialog .access-error {
+  color: #f3a49c;
+}
+.access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 10px;
+}
+.session-button {
+  padding: 6px 10px;
+  margin-left: 8px;
 }

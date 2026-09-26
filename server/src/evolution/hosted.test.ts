@@ -42,6 +42,27 @@ test('hosted sessions fail closed and issue a scoped, expiring, HTTP-only cookie
     const cookie = response.headers.get('set-cookie')!;
     assert.match(cookie, /HttpOnly; Secure; SameSite=Strict/);
     assert.ok(!cookie.includes(code));
+    assert.match(cookie, /Max-Age=3600/);
+    const crossOriginLogout = await sessionEndpoint.fetch(
+      new Request(`${origin}/api/arena/session`, {
+        method: 'DELETE',
+        headers: { origin: 'https://another.example', cookie },
+      }),
+    );
+    assert.equal(crossOriginLogout.status, 403);
+    const logout = await sessionEndpoint.fetch(
+      new Request(`${origin}/api/arena/session`, {
+        method: 'DELETE',
+        headers: { origin, cookie },
+      }),
+    );
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get('set-cookie')!, /Max-Age=0/);
+    assert.equal(
+      authenticated(request('/api/arena/session', undefined, logout.headers.get('set-cookie')!)),
+      false,
+    );
+    assert.equal((await sessionEndpoint.fetch(request('/api/arena/session', null))).status, 401);
     assert.ok(authenticated(request('/api/arena/session', undefined, cookie)));
     assert.equal(
       authenticated(request('/api/arena/session', undefined, cookie.replace(/=[^.]+/, '=1'))),
