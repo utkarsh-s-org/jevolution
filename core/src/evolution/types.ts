@@ -358,6 +358,7 @@ export interface RunConfig {
   maxSeconds: number;
 }
 export interface PublicStatus {
+  readOnly?: boolean;
   running: boolean;
   reason: string;
   ready: Record<Lineage, boolean>;

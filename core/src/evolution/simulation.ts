@@ -316,11 +316,16 @@ export function applyDecision(
   r: Rabbit,
   decision: Decision,
   choices: Candidate[],
+  onReject?: (reason: string) => void,
 ): boolean {
+  const reject = (reason: string) => {
+    onReject?.(reason);
+    return false;
+  };
   const RULES = rulesFor(world);
   const chosen = choices.find((c) => c.id === decision.choice);
   if (!chosen || !['none', 'danger', 'food', 'follow', 'help'].includes(decision.signal))
-    return false;
+    return reject('choice-or-signal-invalid');
   if (
     chosen.action === 'mate' &&
     (!mature(r, RULES) ||
@@ -328,22 +333,25 @@ export function applyDecision(
         (a) => a.id === chosen.mateId && a.lineage === r.lineage && mature(a, RULES),
       ))
   )
-    return false;
+    return reject('mate-no-longer-eligible');
   if (
     chosen.action === 'follow' &&
     !world.rabbits.some((n) => n.id === chosen.followId && visible(world, r, n, vision(r)))
   )
-    return false;
-  if (!validReliefChoice(world, r, chosen, vision(r))) return false;
-  if (chosen.target && !walkable(world, chosen.target)) return false;
+    return reject('leader-not-visible');
+  if (!validReliefChoice(world, r, chosen, vision(r)))
+    return reject('relief-target-no-longer-valid');
+  if (chosen.target && !walkable(world, chosen.target)) return reject('target-not-walkable');
   if (
     (chosen.action === 'forage' || chosen.action === 'collect') &&
     (tileAt(world, chosen.target!)?.food ?? 0) < 0.1
   )
-    return false;
-  if (chosen.action === 'drink' && !nearWater(world, chosen.target!)) return false;
+    return reject('food-depleted');
+  if (chosen.action === 'drink' && !nearWater(world, chosen.target!))
+    return reject('water-unavailable');
   const route = chosen.target ? findRoute(world, r, chosen.target) : [];
-  if (chosen.target && distance(r, chosen.target) > 0.8 && !route.length) return false;
+  if (chosen.target && distance(r, chosen.target) > 0.8 && !route.length)
+    return reject('route-unavailable');
   if (choices.some((c) => c.action === 'follow')) {
     for (const behavior of [r.behavior, world.stats[r.lineage].behavior]) {
       behavior.offered++;

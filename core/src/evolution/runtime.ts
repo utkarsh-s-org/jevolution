@@ -10,6 +10,7 @@ import { DecisionJournal } from './decisions.js';
 import { validateExperimentPreview } from './experimentPreview.js';
 import { editWorldMap, validateMapEdits } from './mapEditor.js';
 import { ProviderError } from './providerError.js';
+import { costBreakdown } from './reporting.js';
 import type { RuntimeReplay, RuntimeServices } from './runtimePorts.js';
 import { applyDecision, observe, stepWorld } from './simulation.js';
 import type {
@@ -47,6 +48,15 @@ export class SimulationRuntime {
   private tickTimer: ReturnType<typeof setInterval>;
   private lastTick = performance.now();
   private savedInitial = false;
+  readonly metrics = {
+    replayCaptures: 0,
+    replayMs: 0,
+    logRecords: 0,
+    logMs: 0,
+    ticks: 0,
+    tickMs: 0,
+    maxTickMs: 0,
+  };
   replay: RuntimeReplay;
   private services: RuntimeServices;
   constructor(services: RuntimeServices) {
@@ -81,7 +91,10 @@ export class SimulationRuntime {
     return Object.values(this.world.stats).reduce((sum, s) => sum + s.requested, 0);
   }
   private captureReplay() {
+    const started = performance.now();
     this.replay.capture(this.snapshot());
+    this.metrics.replayCaptures++;
+    this.metrics.replayMs += performance.now() - started;
   }
   readiness() {
     const ready = this.services.providerReadiness();
@@ -101,20 +114,6 @@ export class SimulationRuntime {
     const backlog = this.zeros();
     for (const r of this.actors())
       if (!r.pending && (r.nextDecision ?? 0) <= this.world.time) backlog[r.lineage!]++;
-    const a = this.world.stats;
-    const knownPrice =
-      this.world.groups.filter((g) => g.controller !== 'deterministic').length === 2 &&
-      this.world.groups
-        .filter((g) => g.controller !== 'deterministic')
-        .every(
-          (g) =>
-            (g.id === 'jev' &&
-              g.provider === 'typesafe' &&
-              g.model === this.services.modelDefaults.jev) ||
-            (g.id === 'claude' &&
-              g.provider === 'anthropic' &&
-              g.model === this.services.modelDefaults.claude),
-        );
     return {
       running: this.running,
       providerReady: this.services.providerReadiness(),
@@ -127,19 +126,14 @@ export class SimulationRuntime {
       config: { ...this.config },
       runId: this.runId,
       connections: this.connections,
-      estimatedCost:
-        this.world.scenario === 'predatorPrey'
-          ? // Every predator–prey call is Jev (TypeSafe), priced like the arena's Jev group.
-            (Object.values(a).reduce((sum, s) => sum + s.inputTokens, 0) * 0.042) / 1e6
-          : knownPrice
-            ? (a.jev.inputTokens * 0.042 + a.claude.inputTokens + a.claude.outputTokens * 5) / 1e6
-            : null,
+      estimatedCost: costBreakdown(this.world).usd,
     };
   }
   snapshot(): Snapshot {
     return { world: this.world, status: this.status(), decisions: this.decisions.snapshot() };
   }
   private record(event: Record<string, unknown>) {
+    const started = performance.now();
     try {
       this.services.record(this.runId, {
         wallTime: new Date().toISOString(),
@@ -149,6 +143,9 @@ export class SimulationRuntime {
       });
     } catch {
       this.pause('Recording failed. Run stopped to avoid losing decision provenance.');
+    } finally {
+      this.metrics.logRecords++;
+      this.metrics.logMs += performance.now() - started;
     }
   }
   start() {
@@ -215,6 +212,8 @@ export class SimulationRuntime {
     this.decisions.clear();
     this.replay = this.services.createReplay(this.runId);
     this.savedInitial = false;
+    for (const key of Object.keys(this.metrics) as (keyof typeof this.metrics)[])
+      this.metrics[key] = 0;
     this.backoff = this.zeros();
     this.reason = 'New habitat ready. Configure keys for the selected providers, then start.';
     this.captureReplay();
@@ -270,6 +269,18 @@ export class SimulationRuntime {
     this.captureReplay();
   }
   private tick() {
+    if (!this.running) return this.advance();
+    const started = performance.now();
+    try {
+      this.advance();
+    } finally {
+      const elapsed = performance.now() - started;
+      this.metrics.ticks++;
+      this.metrics.tickMs += elapsed;
+      this.metrics.maxTickMs = Math.max(this.metrics.maxTickMs, elapsed);
+    }
+  }
+  private advance() {
     const now = performance.now();
     const elapsed = (now - this.lastTick) / 1000;
     this.lastTick = now;
@@ -297,7 +308,13 @@ export class SimulationRuntime {
       this.ecologyFinished()
     ) {
       this.record({ type: 'finished', snapshot: this.snapshot() });
-      this.pause('Run complete · export your observations or reset.');
+      this.pause(
+        this.world.time >= this.config.maxSeconds
+          ? 'Run complete · simulation horizon reached.'
+          : requested >= this.config.maxRequests
+            ? 'Request cap reached before simulation horizon · export this partial run.'
+            : 'Run stopped · no active population remains.',
+      );
       return;
     }
     const status = this.status();
@@ -400,6 +417,10 @@ export class SimulationRuntime {
       const effectiveMs = performance.now() - started;
       if (config.timing === 'realtime') late = effectiveMs > deadline;
       let outcome: DecisionTrace['state'] = 'applied';
+      let rejectionReason: string | undefined;
+      const reject = (reason: string) => {
+        rejectionReason = reason;
+      };
       if (
         epoch !== this.epoch ||
         !this.running ||
@@ -412,13 +433,13 @@ export class SimulationRuntime {
         outcome = 'late';
       } else if (
         !('wolf' in observation
-          ? applyWolfDecision(world, rabbit as Wolf, result.decision, observation.choices)
-          : applyDecision(world, rabbit as Rabbit, result.decision, observation.choices))
+          ? applyWolfDecision(world, rabbit as Wolf, result.decision, observation.choices, reject)
+          : applyDecision(world, rabbit as Rabbit, result.decision, observation.choices, reject))
       ) {
         stats.invalid++;
         outcome = 'invalid';
       } else stats.applied++;
-      publish({ state: outcome, effectiveMs });
+      publish({ state: outcome, effectiveMs, message: rejectionReason });
       this.failures[lineage] = 0;
       this.record({
         type: 'decision',
@@ -431,6 +452,7 @@ export class SimulationRuntime {
         queueMs,
         effectiveMs,
         outcome,
+        rejectionReason,
       });
     } catch (error) {
       if (

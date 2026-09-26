@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { parseEnv } from 'node:util';
 
@@ -13,6 +15,7 @@ import {
 } from '../../../core/src/evolution/constants.js';
 import { validateExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
 import type { RunConfig } from '../../../core/src/evolution/types.js';
+import { exportBundle } from './evidence.js';
 import { ArenaRuntime } from './runtime.js';
 
 const root = process.cwd();
@@ -58,6 +61,7 @@ async function main() {
   const port = Number(process.env.ARENA_PORT || 4317);
   const runtime = new ArenaRuntime(path.join(root, 'logs/evolution'));
   const app = Fastify({ logger: false, bodyLimit: 16384 });
+  let exporting = false;
   const allowed = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   app.addHook('onRequest', async (request, reply) => {
     if (!allowed.has(request.headers.host || ''))
@@ -97,6 +101,7 @@ async function main() {
   });
   app.post('/api/arena/control', async (request, reply) => {
     try {
+      if (exporting) throw new Error('Wait for the experiment export to finish.');
       const body = request.body as Record<string, unknown>;
       if (!body || typeof body !== 'object') throw new Error('JSON object required');
       if (body.action === 'start') {
@@ -128,6 +133,7 @@ async function main() {
   });
   app.post('/api/arena/map', { bodyLimit: 262144 }, async (request, reply) => {
     try {
+      if (exporting) throw new Error('Wait for the experiment export to finish.');
       const body = request.body as Record<string, unknown>;
       if (!body || typeof body !== 'object') throw new Error('JSON object required');
       runtime.editMap(body.runId, body.revision, body.edits);
@@ -189,6 +195,37 @@ async function main() {
       unsubscribe();
       clearInterval(heartbeat);
     });
+  });
+  app.get('/api/arena/report', async () => runtime.report());
+  app.get('/api/arena/bundle', async (_request, reply) => {
+    if (exporting || runtime.running || Object.values(runtime.status().inFlight).some(Boolean))
+      return reply.code(409).send({ error: 'Pause and wait for pending calls/export to finish.' });
+    exporting = true;
+    const directory = await mkdtemp(path.join(tmpdir(), 'jevolution-bundle-'));
+    try {
+      runtime.replay.flush();
+      const snapshot = structuredClone(runtime.snapshot());
+      const result = await exportBundle(
+        path.join(root, 'logs/evolution'),
+        snapshot,
+        path.join(directory, 'experiment.tar.gz'),
+      );
+      const stream = createReadStream(result.output);
+      stream.on('close', () => {
+        void rm(directory, { recursive: true, force: true });
+      });
+      return reply
+        .header('content-disposition', `attachment; filename="${snapshot.status.runId}.tar.gz"`)
+        .type('application/gzip')
+        .send(stream);
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true });
+      return reply
+        .code(400)
+        .send({ error: error instanceof Error ? error.message : 'Export failed' });
+    } finally {
+      exporting = false;
+    }
   });
   app.get('/api/arena/export', async (_request, reply) =>
     reply
