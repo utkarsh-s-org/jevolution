@@ -344,6 +344,8 @@ export interface World {
   migrants?: { wolves: number; rabbits: number; lastAt: number };
 }
 export interface RunConfig {
+  /** Unapplied experiment design metadata, not physics or model input. */
+  experimentPreview?: import('./experimentPreview.js').ExperimentPreview;
   scenario?: Scenario;
   /** World seconds per real second (1–4). Faster cycles, same calls per real second. */
   timeScale?: number;

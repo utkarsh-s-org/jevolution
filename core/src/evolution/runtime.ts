@@ -6,6 +6,7 @@ import {
   validateGroups,
 } from './constants.js';
 import { DecisionJournal } from './decisions.js';
+import { validateExperimentPreview } from './experimentPreview.js';
 import { editWorldMap, validateMapEdits } from './mapEditor.js';
 import { ProviderError } from './providerError.js';
 import type { RuntimeReplay, RuntimeServices } from './runtimePorts.js';
@@ -194,6 +195,7 @@ export class SimulationRuntime {
     }
   }
   reset(seed: number, config: RunConfig, roster: ModelGroup[] = this.world.groups) {
+    const experimentPreview = validateExperimentPreview(config.experimentPreview);
     if (this.active.size)
       throw new Error('Pending calls are still cancelling. Try resetting in a moment.');
     // Predator–prey always runs its preset: Jev rabbits vs Jev wolves with a wolf life cycle.
@@ -203,7 +205,7 @@ export class SimulationRuntime {
       : validateGroups(roster);
     this.pause();
     this.world = createWorld(seed, groups, config.scenario);
-    this.config = { ...config };
+    this.config = { ...config, experimentPreview };
     this.runId = this.services.id();
     this.decisions.clear();
     this.replay = this.services.createReplay(this.runId);
