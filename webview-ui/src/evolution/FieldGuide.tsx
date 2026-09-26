@@ -152,7 +152,7 @@ export function FieldGuide({ onReturn }: { onReturn: () => void }) {
             No values for α, β, δ or γ have been fitted here. Our births require pairs and energy;
             predation depends on terrain, distance, decisions and a {RULES.wolfEatCooldown}-second
             post-catch cooldown. Two worlds with the same counts can evolve differently. Population
-            cycles, stable coexistence and extinction are possible outcomes to investigate—not
+            cycles, stable coexistence and extinction are possible outcomes to investigate, not
             promised results.
           </p>
           <p>
@@ -310,7 +310,7 @@ export function FieldGuide({ onReturn }: { onReturn: () => void }) {
         <p>
           Memory contains each rabbit’s own bounded sightings of food, water and wolves. It is
           neither automatically shared nor inherited. A coordinated sequence can emerge from
-          choices, but follow and share are already supplied actions—not newly invented tools or a
+          choices, but follow and share are already supplied actions, not newly invented tools or a
           learned communication language.
         </p>
       </section>
