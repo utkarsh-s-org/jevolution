@@ -3286,3 +3286,22 @@ select {
     justify-content: end;
   }
 }
+/* Hosted run authorization stays compact and within normal page flow. */
+.run-access {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid #46543e;
+  background: #1b281e;
+}
+.run-access input {
+  min-width: 160px;
+  flex: 1;
+}
+.run-access small {
+  width: 100%;
+  color: #a7b59b;
+}

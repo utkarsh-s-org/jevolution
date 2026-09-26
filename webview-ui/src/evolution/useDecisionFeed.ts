@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import type { DecisionFeed, Snapshot } from '../../../core/src/evolution/types.js';
+import { HOSTED } from './hostedClient.js';
 
 export function useDecisionFeed(snapshot: Snapshot | null, animalId: number, reviewing: boolean) {
   const runId = snapshot?.status.runId;
   const [feed, setFeed] = useState<DecisionFeed | null>(null);
   const [connected, setConnected] = useState(false);
   useEffect(() => {
-    if (!runId || reviewing) return;
+    if (!runId || reviewing || HOSTED) return;
     let closed = false;
     const events = new EventSource(
       `/api/arena/decisions/${animalId}?runId=${encodeURIComponent(runId)}`,

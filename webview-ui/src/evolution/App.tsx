@@ -20,6 +20,7 @@ import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
 import { DecisionPanel } from './DecisionPanel.js';
 import { FieldGuide } from './FieldGuide.js';
 import { InheritedTraits, LatencyPanel, PopulationOutcomes } from './GroupPanels.js';
+import { arenaRequest, HOSTED, hostedClient } from './hostedClient.js';
 import { MapEditor } from './MapEditor.js';
 import { ModelSettings } from './ModelSettings.js';
 import { OrganismInspector } from './OrganismInspector.js';
@@ -39,6 +40,8 @@ const time = (seconds: number) =>
     .padStart(2, '0')}`;
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [showAccess, setShowAccess] = useState(false);
+  const [accessCode, setAccessCode] = useState('');
   const replay = useReplay(snapshot);
   const editor = useMapEditor(snapshot, replay.reviewing, setSnapshot);
   const editing = useRef(editor);
@@ -104,6 +107,11 @@ export default function App() {
     return () => observer.disconnect();
   }, [view, editor.open]);
   useEffect(() => {
+    if (HOSTED)
+      return hostedClient().subscribe((next) => {
+        setSnapshot(next);
+        setConnected(true);
+      });
     const events = new EventSource('/api/arena/events');
     events.onmessage = (event) => {
       const data = JSON.parse(event.data) as Snapshot;
@@ -141,20 +149,18 @@ export default function App() {
     return () => instance.dispose();
   }, []);
   async function control(action: string) {
+    if (HOSTED && action === 'start' && !hostedClient().authenticated) {
+      setShowAccess(true);
+      return;
+    }
     if (action === 'start' || action === 'reset') replay.goLive();
     setBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/arena/control', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          ...(action === 'reset' ? { seed, config, groups: groupsDraft } : {}),
-        }),
+      const data = await arenaRequest('control', {
+        action,
+        ...(action === 'reset' ? { seed, config, groups: groupsDraft } : {}),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Control failed');
       setSnapshot(data as Snapshot);
       if (action === 'reset') {
         selectAnimal(null);
@@ -284,7 +290,12 @@ export default function App() {
         <div className="playback-actions">
           <button
             className="primary-button"
-            disabled={editor.open || busy || !connected || (!liveStatus?.running && !!missingKeys)}
+            disabled={
+              editor.open ||
+              busy ||
+              !connected ||
+              (!HOSTED && !liveStatus?.running && !!missingKeys)
+            }
             onClick={() => void control(liveStatus?.running ? 'pause' : 'start')}
           >
             {liveStatus?.running
@@ -339,9 +350,34 @@ export default function App() {
             </svg>
           </button>
         </div>
-        <a className="export-link" href="/api/arena/export" download>
-          Export run ↓
-        </a>
+        {!HOSTED && (
+          <a className="export-link" href="/api/arena/export" download>
+            Export run ↓
+          </a>
+        )}
+        {HOSTED && (
+          <button
+            className="export-link"
+            onClick={() => {
+              void arenaRequest('export')
+                .then((data) => {
+                  const url = URL.createObjectURL(
+                    new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), ...data })], {
+                      type: 'application/json',
+                    }),
+                  );
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `jevolution-${data.status.runId}.json`;
+                  link.click();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                })
+                .catch((error: Error) => setError(error.message));
+            }}
+          >
+            Export run ↓
+          </button>
+        )}
       </div>
       {editor.open && (
         <div className="editor-top-hint">Paused · paint to preview · apply when ready</div>
@@ -412,10 +448,53 @@ export default function App() {
         </nav>
         <div className="top-meta">
           <span className={`connection-dot ${connected ? 'connected' : ''}`} />
-          {connected ? 'LOCAL SERVER' : 'CONNECTING'}
+          {connected ? (HOSTED ? 'LIVE ENGINE' : 'LOCAL SERVER') : 'CONNECTING'}
         </div>
       </header>
       <main className={view === 'habitat' ? 'habitat-main' : undefined}>
+        {showAccess && (
+          <form
+            className="run-access"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setBusy(true);
+              setError('');
+              void fetch('/api/arena/session', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ code: accessCode }),
+              })
+                .then(async (response) => {
+                  const data = await response.json();
+                  if (!response.ok) throw new Error(data.error || 'Could not unlock simulation');
+                  setAccessCode('');
+                  setShowAccess(false);
+                  await hostedClient().request('refresh');
+                })
+                .catch((error: Error) => setError(error.message))
+                .finally(() => setBusy(false));
+            }}
+          >
+            <label htmlFor="run-access-code">Run access code</label>
+            <input
+              id="run-access-code"
+              type="password"
+              autoComplete="current-password"
+              value={accessCode}
+              onChange={(event) => setAccessCode(event.target.value)}
+              required
+            />
+            <button className="primary-button" disabled={busy}>
+              Unlock simulation
+            </button>
+            <button type="button" className="secondary-button" onClick={() => setShowAccess(false)}>
+              Cancel
+            </button>
+            <small>
+              Protects the configured model API credits. Each browser runs its own ecosystem.
+            </small>
+          </form>
+        )}
         {view !== 'habitat' && populationSummary}
         {error && (
           <div className="error-banner" role="alert">
@@ -679,7 +758,7 @@ export default function App() {
           </section>
         )}
         {view === 'guide' && <FieldGuide onReturn={() => navigate('habitat')} />}
-        {view === 'analytics' && missingKeys && (
+        {view === 'analytics' && missingKeys && !HOSTED && (
           <section className="setup-panel">
             <div>
               <span className="eyebrow">CONNECT YOUR MODELS</span>

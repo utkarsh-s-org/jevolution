@@ -1,0 +1,6 @@
+.env*
+logs/
+notes/
+.git/
+.codex/
+*.log

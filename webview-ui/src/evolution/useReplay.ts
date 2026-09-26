@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { Snapshot } from '../../../core/src/evolution/types.js';
+import { arenaRequest } from './hostedClient.js';
 
 export function useReplay(live: Snapshot | null) {
   const [request, setRequest] = useState<{ runId: string; index: number } | null>(null);
@@ -28,12 +29,9 @@ export function useReplay(live: Snapshot | null) {
         const index = nextIndex;
         nextIndex = undefined;
         try {
-          const r = await fetch(
-            `/api/arena/replay/${index}?runId=${encodeURIComponent(activeRunId)}`,
-            { signal: controller.signal },
+          const data = await arenaRequest<{ index: number; snapshot: Snapshot }>(
+            `replay/${index}?runId=${encodeURIComponent(activeRunId)}`,
           );
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.error || 'Replay unavailable');
           if (!controller.signal.aborted && id === generation.current) {
             setLoaded({
               index,
