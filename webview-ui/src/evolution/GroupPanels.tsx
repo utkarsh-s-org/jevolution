@@ -97,9 +97,10 @@ export function PopulationOutcomes({ snapshot }: { snapshot: Snapshot | null }) 
 export function InheritedTraits({ snapshot }: { snapshot: Snapshot | null }) {
   const rosterKey = JSON.stringify(snapshot?.world.groups);
   const seed = snapshot?.world.seed;
+  const scenario = snapshot?.world.scenario;
   const founders = useMemo(
-    () => (seed === undefined ? null : createWorld(seed, JSON.parse(rosterKey))),
-    [seed, rosterKey],
+    () => (seed === undefined ? null : createWorld(seed, JSON.parse(rosterKey), scenario)),
+    [seed, rosterKey, scenario],
   );
   if (!snapshot) return null;
   const { world } = snapshot;

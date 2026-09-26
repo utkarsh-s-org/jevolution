@@ -1,4 +1,9 @@
-import { DEFAULT_GROUPS, PROVIDER_KEYS } from '../../../core/src/evolution/constants.js';
+import {
+  DEFAULT_GROUPS,
+  PREDATOR_PREY_RULES as PP,
+  PROVIDER_KEYS,
+  RULES,
+} from '../../../core/src/evolution/constants.js';
 import type {
   Decision,
   ModelGroup,
@@ -8,11 +13,28 @@ import type {
 } from '../../../core/src/evolution/types.js';
 
 export const MODEL_DEFAULTS = { jev: 'jev-1.13.0', claude: 'claude-haiku-4-5-20251001' } as const;
-export const INSTRUCTIONS =
-  'You control one rabbit in a continuously moving ecosystem. Choose exactly one supplied legal action. Survive, maintain food energy and hydration, and reproduce with your lineage. Wolves can kill you while you wait. Use only your local observation and supplied personal memory. A movement action follows a path until another decision replaces it. Foraging and drinking continue on arrival. Rest conserves energy but cannot replenish it. Mating requires BOTH rabbits to choose each other and both to be healthy mature and nearby, and costs energy. Your inherited traits have engine-enforced tradeoffs: speed raises movement and energy use; vigilance widens vision and costs metabolism; thrift saves metabolism but slows movement and eating; fertility shortens reproduction cooldown but costs more energy; sociability increases signal range and signal cost. Memory contains only your own prior sightings at decision times, with ages: at most 4 food locations for 120 seconds, 2 water locations for 180 seconds, and 4 wolf sightings for 20 seconds. Old food may be depleted and wolves may have moved. Revisit choices let you inspect remembered locations. Memory is not inherited or shared automatically. You can observe neighbors moving and choose to follow a visible rabbit; tracking stops when it leaves sight. Receiving a signal never forces an action. Signals are optional, local, audible to either lineage, delayed, and cost energy. They refer to your current position and can be wrong. Choose the action and signal that best balance your survival and descendants. You can carry up to 4 food units: collect removes food from the ground without eating it; eatCargo feeds yourself; share delivers it to a visible hungry rabbit; deposit and withdraw use communal caches at burrows. Every unit restores 4 energy. Caches are open to either lineage. Sharing is optional and costs you inventory; help is an optional request for food below 55 energy. During drought, exposed grass withers; forest and lakeside patches retain food better, and carried or cached food is protected. Choose whether to prepare, deliver, or conserve based on your local situation. Do not provide a written explanation.';
+// Predator–prey turns off food carrying and sharing, so its rabbits skip that paragraph.
+export const PREY_INSTRUCTIONS =
+  'You control one rabbit in a continuously moving ecosystem. Choose exactly one supplied legal action. Survive, maintain food energy and hydration, and reproduce with your lineage. Wolves can kill you while you wait. Use only your local observation and supplied personal memory. A movement action follows a path until another decision replaces it. Foraging and drinking continue on arrival. Rest conserves energy but cannot replenish it. Mating requires BOTH rabbits to choose each other and both to be healthy mature and nearby, and costs energy. Your inherited traits have engine-enforced tradeoffs: speed raises movement and energy use; vigilance widens vision and costs metabolism; thrift saves metabolism but slows movement and eating; fertility shortens reproduction cooldown but costs more energy; sociability increases signal range and signal cost. Memory contains only your own prior sightings at decision times, with ages: at most 4 food locations for 120 seconds, 2 water locations for 180 seconds, and 4 wolf sightings for 20 seconds. Old food may be depleted and wolves may have moved. Revisit choices let you inspect remembered locations. Memory is not inherited or shared automatically. You can observe neighbors moving and choose to follow a visible rabbit; tracking stops when it leaves sight. Receiving a signal never forces an action. Signals are optional, local, audible to either lineage, delayed, and cost energy. They refer to your current position and can be wrong. Choose the action and signal that best balance your survival and descendants. Do not provide a written explanation.';
+export const INSTRUCTIONS = PREY_INSTRUCTIONS.replace(
+  ' Do not provide a written explanation.',
+  ` You can carry up to 4 food units: collect removes food from the ground without eating it; eatCargo feeds yourself; share delivers it to a visible hungry rabbit; deposit and withdraw use communal caches at burrows. Every unit restores 4 energy. Caches are open to either lineage. Sharing is optional and costs you inventory; help is an optional request for food below 55 energy. During drought, exposed grass withers; forest and lakeside patches retain food better, and carried or cached food is protected. Choose whether to prepare, deliver, or conserve based on your local situation. Do not provide a written explanation.`,
+);
 
 export const WOLF_INSTRUCTIONS =
   'You control one wolf in a continuously moving ecosystem. Choose one supplied legal action to survive, catch rabbits, and reproduce with your lineage. Use only your local observation: shelters exclude attacks, hiding forest rabbits are visible only within 2 tiles, and ordinary sight is 10 tiles with terrain occlusion. Hunting tracks your chosen prey only while visible. All wolves have identical movement speed and an 18-second eating cooldown after a catch, during which they cannot attack and move more slowly. You may rest, patrol, or choose a visible prey when hungry. Nearby wolves are observations, not commands. You may also choose a supplied mate action; mating requires both wolves to choose each other. Read lifeCycle in your observation. In dynamic mode, energy drains by 0.6 per second plus 0.1 per tile moved; catching a rabbit restores 45 energy (maximum 100). Zero energy causes starvation and age above 240 seconds causes death. Birth requires two living wolves from the same group, both at least 30 seconds old, with at least 95 energy and no reproduction cooldown. Both must choose each other as mates and meet within 1.7 tiles with a free nearby land tile and fewer than 32 wolves. Each parent pays 50 energy and waits 45 seconds before another birth. A catch alone never produces offspring; hunting funds the energy needed for mating. In fixed mode, population is held constant with no energy loss, births or deaths. Signals are not supported; choose none. Do not provide a written explanation.';
+
+// Predator–prey wolves follow different rules (solo pups, no old age, encounter kills, scent),
+// so they get their own text, built from the preset's numbers so it cannot drift.
+export const PREDATOR_PREY_WOLF_INSTRUCTIONS = [
+  'You control one wolf hunting rabbits in a continuously moving ecosystem. Choose exactly one supplied legal action.',
+  `Your energy drains by ${PP.wolfMetabolism} per second (maximum 100); at 0 you starve. There is no old age.`,
+  `Catching a rabbit restores ${PP.wolfMealEnergy} energy. You catch any exposed rabbit you reach, not only the one you chase; after a catch you rest ${PP.wolfEatCooldown} seconds.`,
+  `With at least ${PP.wolfBreedEnergy} energy you automatically have a pup beside you; it costs ${PP.wolfBreedCost} energy and you wait ${PP.wolfBreedCooldown} seconds before the next. No mate is needed, so hunting is how you raise pups.`,
+  `Sight is ${PP.wolfSight} tiles with terrain occlusion. Rabbits in burrows are safe; rabbits hiding in forest are visible only within ${PP.shelteredWolfRange} tiles.`,
+  `Hunt actions chase one visible rabbit while it stays visible.${PP.wolfScent ? ' When no rabbit is in sight, following the scent moves you toward the nearest rabbits.' : ''} Patrols move you in a fixed direction to find prey. Resting never feeds you.`,
+  'Signals are not supported; choose none. Do not provide a written explanation.',
+].join(' ');
 
 export class ProviderError extends Error {
   nativeResponse?: NativeDecisionResponse;
@@ -59,10 +81,21 @@ export async function choose(
   group: ModelGroup,
   observation: ModelObservation,
   signal: AbortSignal,
+  { relief = true, predatorPrey = false }: { relief?: boolean; predatorPrey?: boolean } = {},
 ): Promise<Result> {
   if (group.controller === 'deterministic')
     throw new ProviderError('Deterministic wolves do not use a model API');
-  const instructions = 'wolf' in observation ? WOLF_INSTRUCTIONS : INSTRUCTIONS;
+  const instructions =
+    'wolf' in observation
+      ? predatorPrey
+        ? PREDATOR_PREY_WOLF_INSTRUCTIONS
+        : WOLF_INSTRUCTIONS
+      : relief
+        ? INSTRUCTIONS
+        : PREY_INSTRUCTIONS;
+  // "Need food" is offered only to a rabbit that is actually hungry, and only with relief on.
+  const hungry =
+    relief && 'rabbit' in observation && observation.rabbit.energy < RULES.hungryEnergy;
   const started = performance.now();
   const { provider, model } = group;
   const choices = Object.fromEntries(observation.choices.map((c) => [c.id, c.description]));
@@ -70,11 +103,18 @@ export async function choose(
     'wolf' in observation
       ? { none: 'Do not signal.' }
       : {
-          help: 'Request food at your current location when energy is below 55. Local signal; costs energy; at most once every 6 seconds.',
-          none: 'Do not signal.',
-          danger: 'Warn that danger is near your current location.',
-          food: 'Report food at your current location.',
-          follow: 'Invite nearby rabbits to follow you.',
+          // "none" first: models favor the first option. Each signal says when to use it and why.
+          none: 'Do not signal. The default when nothing below applies.',
+          danger:
+            'Danger: use when a wolf is in sight. Warns nearby allies so they can hide or flee in time.',
+          food: 'Food here: use when you are on a patch with food to spare. Nearby allies can come and eat instead of searching.',
+          follow:
+            'Follow me: use when you are heading to food, water, or safety. Nearby allies can follow you there.',
+          ...(hungry
+            ? {
+                help: 'Need food: your energy is low. Asks nearby rabbits to bring you food; at most once every 6 seconds.',
+              }
+            : {}),
         };
   const parameters = {
     type: 'object',

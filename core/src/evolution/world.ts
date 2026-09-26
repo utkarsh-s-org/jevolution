@@ -1,4 +1,12 @@
-import { DEFAULT_GROUPS, GENE_NAMES, GRID, RULES, validateGroups } from './constants.js';
+import {
+  DEFAULT_GROUPS,
+  GENE_NAMES,
+  GRID,
+  PREDATOR_PREY_BUDGET,
+  RULES,
+  rulesFor,
+  validateGroups,
+} from './constants.js';
 import { alignTerrainStamps, terrainStampIndices } from './terrain.js';
 import type {
   Genes,
@@ -7,6 +15,7 @@ import type {
   ModelGroup,
   Point,
   Rabbit,
+  Scenario,
   Tile,
   Wolf,
   World,
@@ -136,6 +145,7 @@ export function createRabbit(
   generation = 0,
   parents: number[] = [],
 ): Rabbit {
+  const RULES = rulesFor(world);
   return {
     id: world.nextId++,
     lineage,
@@ -170,6 +180,7 @@ export function createWolf(
   position: Point,
   parents: Wolf[] = [],
 ): Wolf {
+  const RULES = rulesFor(world);
   return {
     id: world.nextId++,
     lineage,
@@ -187,7 +198,7 @@ export function createWolf(
     generation: parents.length ? Math.max(...parents.map((p) => p.generation ?? 0)) + 1 : 0,
     parents: parents.map((p) => p.id),
     born: world.time,
-    reproductionCooldown: 0,
+    reproductionCooldown: parents.length ? 0 : RULES.wolfFounderPupDelay,
   };
 }
 
@@ -337,7 +348,7 @@ function generateTerrain(world: World) {
     t.kind = 'shelter';
     t.food = 0;
     shelters.push(t);
-    if (shelters.length === 6) break;
+    if (shelters.length === rulesFor(world).shelterCount) break;
   }
 }
 
@@ -382,18 +393,26 @@ function populateFood(world: World) {
       fertility = Math.max(fertility, (1 - (dx * dx + dy * dy) / (edge * edge)) * p.quality);
     }
     if (fertility < 0.12) continue;
-    tile.foodCapacity = RULES.foodCapacity * fertility * (tile.kind === 'forest' ? 0.45 : 1);
+    tile.foodCapacity =
+      rulesFor(world).foodCapacity * fertility * (tile.kind === 'forest' ? 0.45 : 1);
     tile.food = tile.foodCapacity * (0.65 + random(rng) * 0.35);
   }
 }
 
-export function createWorld(seed = 271828, roster: ModelGroup[] = DEFAULT_GROUPS): World {
-  const groups = validateGroups(roster);
+export function createWorld(
+  seed = 271828,
+  roster: ModelGroup[] = DEFAULT_GROUPS,
+  scenario: Scenario = 'arena',
+): World {
+  const predatorPrey = scenario === 'predatorPrey';
+  const rules = rulesFor({ scenario });
+  const groups = validateGroups(roster, predatorPrey ? PREDATOR_PREY_BUDGET : undefined);
   const rabbitGroups = groups.filter((g) => g.species === 'rabbit');
   const wolfGroups = groups.filter((g) => g.species === 'wolf');
   const founders = Math.max(...rabbitGroups.map((g) => g.population!));
   const wolfCount = wolfGroups.reduce((sum, g) => sum + g.population!, 0);
   const world: World = {
+    ...(predatorPrey ? { scenario } : {}),
     groups,
     seed,
     rng: seed >>> 0 || 1,
@@ -426,13 +445,13 @@ export function createWorld(seed = 271828, roster: ModelGroup[] = DEFAULT_GROUPS
   );
   const wolfPositions: Point[] = [];
   for (const p of wolfCount ? shuffle(world, [...grass]) : []) {
-    if (wolfPositions.some((w) => distance(w, p) < 10)) continue;
+    if (wolfPositions.some((w) => distance(w, p) < rules.wolfSpacing)) continue;
     wolfPositions.push(p);
     if (wolfPositions.length === wolfCount) break;
   }
   const positions = shuffle(
     world,
-    grass.filter((p) => wolfPositions.every((w) => distance(w, p) >= 6)),
+    grass.filter((p) => wolfPositions.every((w) => distance(w, p) >= rules.wolfClearance)),
   );
   let positionIndex = 0;
   for (let i = 0; i < founders; i++) {
@@ -473,4 +492,43 @@ export function groupPopulation(world: World, group: ModelGroup): number {
   return (group.species === 'wolf' ? world.wolves : world.rabbits).filter(
     (a) => a.lineage === group.id,
   ).length;
+}
+/** Juvenile dispersal: send a newborn walking to open ground a few tiles from home. */
+export function disperse(world: World, animal: Rabbit | Wolf) {
+  const RULES = rulesFor(world);
+  if (!RULES.dispersalMax) return;
+  const start = { x: animal.x, y: animal.y };
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const angle = random(world) * Math.PI * 2;
+    const reach = RULES.dispersalMin + random(world) * (RULES.dispersalMax - RULES.dispersalMin);
+    const target = center({
+      x: Math.max(1, Math.min(GRID - 2, start.x + Math.cos(angle) * reach)),
+      y: Math.max(1, Math.min(GRID - 2, start.y + Math.sin(angle) * reach)),
+    });
+    if (!walkable(world, target) || tileAt(world, target)?.kind === 'shelter') continue;
+    const route = findRoute(world, animal, target);
+    if (!route.length) continue;
+    animal.path = route;
+    animal.action = 'explore';
+    animal.target = undefined;
+    // Decide again after arriving (walking ~1.2 tiles per second).
+    animal.nextDecision = world.time + distance(start, target) / 1.2;
+    return;
+  }
+}
+const DIRECTIONS = [
+  [1, 0, 'east'],
+  [-1, 0, 'west'],
+  [0, 1, 'south'],
+  [0, -1, 'north'],
+] as const;
+/** The four movement directions, shuffled when the scenario asks for it. */
+export function directions(world: World) {
+  const list = [...DIRECTIONS];
+  if (!rulesFor(world).shuffleDirections) return list;
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(random(world) * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
 }

@@ -1,10 +1,12 @@
-import type { Genes, ModelGroup, Provider, RunConfig, Species } from './types.js';
+import type { Genes, ModelGroup, Provider, RunConfig, Scenario, Species, World } from './types.js';
 
 export const GRID = 64;
 export const INITIAL_PER_LINEAGE = 40;
 export const MAX_POPULATION = 180;
 export const GENE_NAMES = ['speed', 'vigilance', 'thrift', 'fertility', 'sociability'] as const;
 export const DEFAULT_CONFIG: RunConfig = {
+  scenario: 'arena',
+  timeScale: 1,
   deadlineMs: 2500,
   decisionIntervalMs: 100,
   maxInFlight: 4,
@@ -80,7 +82,49 @@ export const RULES = {
   memoryLimit: { food: 4, water: 2, danger: 4 },
   memoryLife: { food: 120, water: 180, danger: 20 },
   followReplan: 0.65,
+  // Predator–prey preset only (PREDATOR_PREY_RULES); the arena leaves these at their defaults.
+  shelterCount: 6,
+  wolfSpacing: 10,
+  wolfClearance: 6,
+  maxPopulation: MAX_POPULATION,
+  /** Rabbit births slow as the count nears this (logistic); 0 disables. */
+  rabbitCapacity: 0,
+  /** Food carrying, sharing, caches, and the "Need food" signal (drought relief). */
+  reliefEnabled: 1,
+  /** Predator–prey: how close two ready wolves must be to have a pup. */
+  wolfPairDistance: 3,
+  /** Predator–prey: a well-fed wolf has a pup beside it on its own (one parent). */
+  wolfSoloPups: 0,
+  /** Predator–prey: a mature, fed rabbit has a litter on its own (female-only population model). */
+  rabbitSoloBirths: 0,
+  /** Predator–prey: list movement directions in a random order, so a model's habit of
+   *  picking the first option doesn't send every animal the same way (east). */
+  shuffleDirections: 0,
+  /** Seconds before a founding (or arriving) wolf can have its first pup. */
+  wolfFounderPupDelay: 0,
+  /** Newborns walk this many tiles (min–max) away from home before deciding; 0 disables. */
+  dispersalMin: 0,
+  dispersalMax: 0,
+  /** Rabbit births slow as neighbours within localCrowdRadius near localCapacity; 0 disables. */
+  localCapacity: 0,
+  localCrowdRadius: 6,
+  /** Predator interference: a catch succeeds with 1 / (1 + k × other wolves within 4 tiles). */
+  wolfInterference: 0,
+  /** Predator–prey: wolves can follow scent toward rabbits beyond sight. */
+  wolfScent: 0,
+  wolfScentRange: 18,
+  passiveBreeding: 0,
+  preyMateDistance: 1.7,
+  wolfEncounterKills: 0,
+  /** Open population: every migrationInterval s, migrants join beside one of their own kind. */
+  migrationInterval: 0,
+  migrationWolves: 1,
+  migrationRabbits: 2,
 } as const;
+/** RULES with literal types widened, so a scenario can override any value. */
+export type Rules = {
+  readonly [K in keyof typeof RULES]: (typeof RULES)[K] extends number ? number : (typeof RULES)[K];
+};
 export const POPULATION_BUDGET: Record<Species, number> = { rabbit: 80, wolf: RULES.wolfCount };
 export const TRAIT_INFO: Record<keyof Genes, { label: string; benefit: string; cost: string }> = {
   speed: {
@@ -152,6 +196,107 @@ export const DEFAULT_GROUPS: ModelGroup[] = [
     delayMs: 0,
   },
 ];
+// Lotka-Volterra-style predator–prey preset: rabbits breed on their own; wolves breed from kills
+// and starve without them. Tuned headlessly for a ~2.5–3 minute cycle (LOTKA-VOLTERRA-SPEC.md).
+export const PREDATOR_PREY_RULES: Rules = {
+  ...RULES,
+  shelterCount: 12,
+  wolfSpacing: 8,
+  wolfClearance: 4,
+  maxPopulation: 250,
+  rabbitCapacity: 160,
+  reliefEnabled: 0,
+  wolfSoloPups: 1,
+  // Births don't hinge on meeting a mate: scattered survivors can still rebuild.
+  rabbitSoloBirths: 1,
+  shuffleDirections: 0,
+  // Young animals leave home, and dense herds breed slowly: this keeps both species spread across
+  // the map (the well-mixed assumption behind Lotka-Volterra) instead of one hidden herd.
+  dispersalMin: 6,
+  dispersalMax: 12,
+  localCapacity: 0,
+  wolfInterference: 1,
+  // Off: scent found rabbits hiding in forest, so hiding no longer protected them and prey
+  // collapsed. Dispersal already keeps rabbits spread out enough for wolves to find.
+  wolfScent: 0,
+  wolfScentRange: 12,
+  passiveBreeding: 1,
+  preyMateDistance: 8,
+  // Rabbits (α): births are a population rate; food and water never limit them.
+  maturity: 8,
+  breedCooldown: 16,
+  breedEnergy: 30,
+  breedWater: 30,
+  breedCost: 10,
+  childEnergy: 60,
+  childWater: 80,
+  foodCapacity: 8,
+  foodRegrowth: 0.1,
+  foodEnergy: 5.5,
+  baseMetabolism: 0.1,
+  restMetabolism: 0.7,
+  thirst: 0.1,
+  forageBout: 1e9,
+  // No old age: founders would all die at once. Prey deaths come from wolves, as in the model.
+  lifespan: 1e9,
+  // Predation (β): wolves catch any exposed rabbit they reach.
+  wolfEncounterKills: 1,
+  wolfSpeed: 1.6,
+  wolfSight: 9,
+  wolfCapture: 0.8,
+  // Handling time + logistic prey (Rosenzweig–MacArthur) give cycles that persist.
+  wolfEatCooldown: 10,
+  // Wolf births (δ) come from kills; deaths (γ) from starvation and a short lifespan.
+  wolfPopulationCap: 150,
+  // Founders start fed but wait before their first pup, so wolves neither starve nor boom on arrival.
+  wolfFounderEnergy: 50,
+  wolfFounderPupDelay: 20,
+  wolfChildEnergy: 33,
+  wolfMetabolism: 1.2,
+  wolfMovementCost: 0,
+  wolfMealEnergy: 40,
+  wolfMaturity: 5,
+  wolfLifespan: 1e9,
+  // Config C from the offline search (passed 10 of 24 fresh runs; see chat).
+  wolfBreedEnergy: 80,
+  wolfBreedCost: 30,
+  wolfBreedCooldown: 10,
+  // A steady trickle of migrants, whatever the numbers: real populations are open, and closed
+  // small predator–prey systems collapse (Gause 1934, Huffaker 1958).
+  migrationInterval: 20,
+};
+export function rulesFor(world: Pick<World, 'scenario'> | undefined): Rules {
+  return world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
+}
+export const PREDATOR_PREY_BUDGET: Record<Species, number> = { rabbit: 80, wolf: 20 };
+export const PREDATOR_PREY_GROUPS: ModelGroup[] = [
+  // Like the textbook start: rabbits ~2x the measured balance (~34), wolves at it (~14). The
+  // distance from balance sets how big the waves are; starting at balance gives only a wobble.
+  { ...DEFAULT_GROUPS[0], label: 'Jev rabbits', population: 70 },
+  {
+    id: 'wolves',
+    species: 'wolf',
+    controller: 'model',
+    wolfLifeCycle: 'dynamic',
+    population: 8,
+    label: 'Jev wolves',
+    provider: 'typesafe',
+    model: DEFAULT_GROUPS[0].model,
+    color: 2,
+    delayMs: 0,
+  },
+];
+export const SCENARIO_CONFIG: Record<Scenario, RunConfig> = {
+  arena: DEFAULT_CONFIG,
+  predatorPrey: {
+    ...DEFAULT_CONFIG,
+    scenario: 'predatorPrey',
+    timeScale: 2,
+    maxInFlight: 6,
+    maxRequests: 14000,
+    maxSeconds: 600,
+  },
+};
 export const MODEL_PRESETS: { label: string; provider: Provider; model: string }[] = [
   ...DEFAULT_GROUPS.filter((g) => g.species !== 'wolf').map(({ label, provider, model }) => ({
     label,
@@ -193,7 +338,10 @@ export function balancePopulations(
   });
 }
 // Validate a fresh roster before changing any running-world state. Return only known fields.
-export function validateGroups(input: unknown): ModelGroup[] {
+export function validateGroups(
+  input: unknown,
+  budget: Record<Species, number> = POPULATION_BUDGET,
+): ModelGroup[] {
   if (!Array.isArray(input) || input.length < 1 || input.length > 6)
     throw new Error('Choose 1–6 animal groups.');
   const ids = new Set<string>();
@@ -248,20 +396,16 @@ export function validateGroups(input: unknown): ModelGroup[] {
   for (let i = 0; i < groups.length; i++) {
     const g = groups[i];
     g.population ??= defaults[i].population;
-    if (
-      !Number.isInteger(g.population) ||
-      g.population! < 1 ||
-      g.population! > POPULATION_BUDGET[g.species]
-    )
+    if (!Number.isInteger(g.population) || g.population! < 1 || g.population! > budget[g.species])
       throw new Error('Each group needs a positive starting population within its species budget.');
   }
   for (const species of ['rabbit', 'wolf'] as const) {
     if (
       groups.filter((g) => g.species === species).reduce((sum, g) => sum + g.population!, 0) >
-      POPULATION_BUDGET[species]
+      budget[species]
     )
       throw new Error(
-        `Starting ${species} population exceeds the ${POPULATION_BUDGET[species]}-animal budget.`,
+        `Starting ${species} population exceeds the ${budget[species]}-animal budget.`,
       );
   }
   return groups;
