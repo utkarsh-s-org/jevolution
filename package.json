@@ -122,6 +122,7 @@
     "vercel:prepare": "npm run test:report && node scripts/assemble-vercel-output.mjs",
     "knip": "knip",
     "arena:build": "node scripts/build-arena.mjs",
+    "arena:deploy:build": "node scripts/ci-arena.mjs",
     "arena": "node dist/arena-server/server/src/evolution/cli.js",
     "arena:check": "tsx --test core/src/evolution/mechanics.test.ts server/src/evolution/modular.test.ts core/src/evolution/wolves.test.ts core/src/evolution/mapEditor.test.ts core/src/evolution/predatorPrey.test.ts",
     "arena:ui": "node scripts/verify-arena-ui.mjs"

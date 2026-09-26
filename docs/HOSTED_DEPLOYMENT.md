@@ -1,6 +1,6 @@
 # Hosted Jevolution
 
-`node scripts/build-arena-public.mjs` builds the working website for Vercel.
+`npm run arena:deploy:build` validates and builds the working website for Vercel.
 It uses the same `SimulationRuntime`, ecology rules, observations, provider adapters,
 decision deadlines, and replay codec as the local `npm run arena` server.
 
@@ -11,7 +11,38 @@ round-trip latency is measured on the server. The decision deadline also include
 the browser-to-server trip, so local and hosted latency results are not directly
 interchangeable.
 
-## Configure and deploy
+## Automatic production deployment
+
+The `jevolution` project in `xrhuang10s-projects` is connected to
+`utkarsh-s-org/jevolution`, with `main` as its production branch and
+`jevolution.world` as its production domain. Merging a PR into `main` triggers
+Vercel's native Git pipeline. Direct pushes to `main` also trigger it.
+
+1. Install the locked dependencies with `npm ci`.
+2. Run the simulation, replay, provider-adapter, and hosted API authentication tests.
+   Provider transport tests use fixtures and incur no model API charges.
+3. Type-check the API, server, shared engine, and UI; build the hosted UI and worker.
+4. Reject missing server credentials, a missing hosted worker, or credentials in
+   public assets. Vercel then compiles `api/arena/session.ts` and
+   `api/arena/decision.ts` into server Functions.
+5. Publish the complete deployment and move `jevolution.world` to it only after
+   the build succeeds. A failed build leaves the previous deployment serving.
+
+This deploys the browser simulation AND the server-side model gateway together;
+`dist/arena` is only the static part of the deployment. Do not upload that folder
+alone or change the Vercel root directory to `webview-ui`.
+
+Automatic builds are limited to `main` by `git.deploymentEnabled` in `vercel.json`.
+Feature branches can be tested with a manual `vercel deploy` preview. There is no
+GitHub Actions workflow, GitHub deployment token, or second CI bill. Vercel Hobby
+limits and model-provider usage still apply. API keys remain in Vercel.
+
+The Git connection and production branch are project settings, not secrets in the
+repository. When recreating this project, run `vercel link`, then
+`vercel git connect https://github.com/utkarsh-s-org/jevolution.git`, and verify that
+Production → Branch Tracking is `main` before enabling automatic deployments.
+
+## Configure and deploy manually
 
 - Link the checkout to the existing personal Vercel project.
 - Set `TYPESAFE_API_KEY`, `ANTHROPIC_API_KEY` (or other configured provider keys),
