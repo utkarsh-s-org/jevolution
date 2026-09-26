@@ -34,6 +34,7 @@ function configFrom(input: Record<string, unknown>): RunConfig {
     equalizedMs: [500, 15000],
     maxRequests: [2, 20000],
     maxSeconds: [10, 1200],
+    timeScale: [1, 4],
   };
   for (const [key, [min, max]] of Object.entries(ranges)) {
     if (input[key] === undefined) continue;
@@ -45,6 +46,9 @@ function configFrom(input: Record<string, unknown>): RunConfig {
   if (input.timing !== undefined && !['realtime', 'equalized'].includes(String(input.timing)))
     throw new Error('Invalid timing mode.');
   if (input.timing) next.timing = input.timing as RunConfig['timing'];
+  if (input.scenario !== undefined && !['arena', 'predatorPrey'].includes(String(input.scenario)))
+    throw new Error('Invalid scenario.');
+  if (input.scenario) next.scenario = input.scenario as RunConfig['scenario'];
   return next;
 }
 async function main() {
@@ -103,10 +107,14 @@ async function main() {
         const seed = body.seed ?? runtime.world.seed;
         if (typeof seed !== 'number' || !Number.isInteger(seed) || seed < 1 || seed > 2147483647)
           throw new Error('Seed must be an integer between 1 and 2147483647.');
+        const config = configFrom((body.config || {}) as Record<string, unknown>);
+        // The predator–prey preset supplies its own roster (see runtime.reset).
         runtime.reset(
           seed,
-          configFrom((body.config || {}) as Record<string, unknown>),
-          body.groups === undefined ? runtime.world.groups : validateGroups(body.groups),
+          config,
+          config.scenario === 'predatorPrey' || body.groups === undefined
+            ? runtime.world.groups
+            : validateGroups(body.groups),
         );
       } else throw new Error('Unknown control action');
       return runtime.snapshot();

@@ -1,4 +1,4 @@
-import { RULES } from './constants.js';
+import { rulesFor } from './constants.js';
 import type {
   Decision,
   Point,
@@ -12,6 +12,8 @@ import {
   addEvent,
   center,
   createWolf,
+  directions,
+  disperse,
   distance,
   findRoute,
   tileAt,
@@ -24,12 +26,14 @@ export function dynamicWolf(world: World, wolf: Wolf): boolean {
 }
 // Biology is identical for deterministic and model-controlled wolves.
 export function ageWolf(world: World, wolf: Wolf, dt: number) {
+  const RULES = rulesFor(world);
   if (!dynamicWolf(world, wolf)) return;
   wolf.age = (wolf.age ?? RULES.wolfMaturity) + dt;
   wolf.energy = (wolf.energy ?? RULES.wolfFounderEnergy) - RULES.wolfMetabolism * dt;
   wolf.reproductionCooldown = Math.max(0, (wolf.reproductionCooldown ?? 0) - dt);
 }
 export function finishWolfLife(world: World, wolf: Wolf, moved: number, caught: boolean) {
+  const RULES = rulesFor(world);
   if (!dynamicWolf(world, wolf)) return;
   wolf.energy = (wolf.energy ?? RULES.wolfFounderEnergy) - moved * RULES.wolfMovementCost;
   if (caught) wolf.energy = Math.min(100, wolf.energy + RULES.wolfMealEnergy);
@@ -50,6 +54,7 @@ export function finishWolfLife(world: World, wolf: Wolf, moved: number, caught: 
   }
 }
 export function wolfReadyToMate(world: World, wolf: Wolf): boolean {
+  const RULES = rulesFor(world);
   return (
     dynamicWolf(world, wolf) &&
     (wolf.age ?? 0) >= RULES.wolfMaturity &&
@@ -59,6 +64,7 @@ export function wolfReadyToMate(world: World, wolf: Wolf): boolean {
   );
 }
 export function wolfMate(world: World, wolf: Wolf, id?: number): Wolf | undefined {
+  const RULES = rulesFor(world);
   if (!wolfReadyToMate(world, wolf)) return;
   return world.wolves.find(
     (other) =>
@@ -72,6 +78,7 @@ export function wolfMate(world: World, wolf: Wolf, id?: number): Wolf | undefine
   );
 }
 export function availableWolfMates(world: World, wolf: Wolf): Wolf[] {
+  const RULES = rulesFor(world);
   if (world.wolves.length >= RULES.wolfPopulationCap || !wolfReadyToMate(world, wolf)) return [];
   return world.wolves
     .filter(
@@ -89,15 +96,35 @@ export function availableWolfMates(world: World, wolf: Wolf): Wolf[] {
 // Run after every adult has moved and paid metabolism: dead/ineligible partners
 // cannot reproduce, and newborns never receive an extra update in their birth step.
 export function reproduceWolves(world: World) {
+  const RULES = rulesFor(world);
   for (const wolf of [...world.wolves]) {
     if (world.wolves.length >= RULES.wolfPopulationCap) return;
-    if (wolf.action !== 'mate') continue;
-    const mate = wolfMate(world, wolf, wolf.mateId);
+    // Predator–prey: ready wolves side by side pair up on their own (the pup appears beside them), so
+    // wolf births follow kills (Lotka-Volterra's δ·R·W) rather than the decision cadence.
+    const passive = !!RULES.passiveBreeding;
+    if (!passive && wolf.action !== 'mate') continue;
+    const solo = passive && !!RULES.wolfSoloPups;
+    if (solo && !wolfReadyToMate(world, wolf)) continue;
+    const mate = solo
+      ? wolf
+      : passive
+        ? world.wolves
+            .filter(
+              (other) =>
+                other.id !== wolf.id &&
+                other.lineage === wolf.lineage &&
+                distance(wolf, other) <= RULES.wolfPairDistance &&
+                wolfReadyToMate(world, wolf) &&
+                wolfReadyToMate(world, other),
+            )
+            .sort((a, b) => distance(wolf, a) - distance(wolf, b) || a.id - b.id)[0]
+        : wolfMate(world, wolf, wolf.mateId);
     if (
       !mate ||
-      mate.action !== 'mate' ||
-      mate.mateId !== wolf.id ||
-      distance(wolf, mate) >= RULES.mateDistance
+      (!passive &&
+        (mate.action !== 'mate' ||
+          mate.mateId !== wolf.id ||
+          distance(wolf, mate) >= RULES.mateDistance))
     )
       continue;
     const position = [
@@ -114,28 +141,33 @@ export function reproduceWolves(world: World) {
           ![...world.rabbits, ...world.wolves].some((animal) => distance(animal, p) < 0.5),
       );
     if (!position) continue;
-    const child = createWolf(world, wolf.lineage!, position, [wolf, mate]);
+    const parents = solo ? [wolf] : [wolf, mate];
+    const child = createWolf(world, wolf.lineage!, position, parents);
+    disperse(world, child);
     world.wolves.push(child);
-    for (const parent of [wolf, mate]) {
+    for (const parent of parents) {
       parent.energy! -= RULES.wolfBreedCost;
       parent.reproductionCooldown = RULES.wolfBreedCooldown;
+      parent.mateId = undefined;
+      // A passive birth doesn't interrupt a chase; a chosen mating ends with a fresh decision.
+      if (passive && parent.action !== 'mate') continue;
       parent.action = 'rest';
       parent.path = [];
       parent.target = undefined;
-      parent.mateId = undefined;
       parent.nextDecision = world.time;
     }
     world.stats[wolf.lineage!].births++;
     addEvent(
       world,
       'birth',
-      `Wolf #${child.id} born · generation ${child.generation} · parents #${wolf.id} + #${mate.id}`,
+      `Wolf #${child.id} born · generation ${child.generation} · ${solo ? `parent #${wolf.id}` : `parents #${wolf.id} + #${mate.id}`}`,
       wolf.lineage,
     );
   }
 }
 
 export function wolfSeesPrey(world: World, wolf: Wolf, rabbit: Rabbit): boolean {
+  const RULES = rulesFor(world);
   const tile = tileAt(world, rabbit);
   return (
     !!tile &&
@@ -151,17 +183,24 @@ export function wolfSeesPrey(world: World, wolf: Wolf, rabbit: Rabbit): boolean 
   );
 }
 export function observeWolf(world: World, wolf: Wolf): WolfObservation {
+  const RULES = rulesFor(world);
   const prey = world.rabbits
     .filter((r) => wolfSeesPrey(world, wolf, r))
     .sort((a, b) => distance(wolf, a) - distance(wolf, b) || a.id - b.id);
-  const choices: WolfCandidate[] = [
-    {
-      id: 'rest',
-      action: 'rest',
-      description: 'Stop and wait. Eating cooldown continues to expire.',
-    },
-  ];
-  for (const mate of availableWolfMates(world, wolf).slice(0, 3))
+  const choices: WolfCandidate[] = [];
+  // Scent: with no rabbit in sight, head toward the nearest exposed rabbit so wolves can find
+  // clustered prey on a big map. Listed first because models favor the first option.
+  const scentTarget =
+    RULES.wolfScent && !prey.length ? scentStep(world, wolf, RULES.wolfSight) : undefined;
+  if (scentTarget)
+    choices.push({
+      id: 'track_scent',
+      action: 'explore',
+      target: scentTarget.target,
+      description: `Follow the scent of rabbits about ${scentTarget.distance.toFixed(0)} tiles away. Moves you ${distance(wolf, scentTarget.target).toFixed(1)} tiles toward them.`,
+    });
+  // Solo pups need no partner, so mate choices would only waste decisions.
+  for (const mate of RULES.wolfSoloPups ? [] : availableWolfMates(world, wolf).slice(0, 3))
     choices.push({
       id: `mate_${mate.id}`,
       action: 'mate',
@@ -176,16 +215,11 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
         id: `hunt_${r.id}`,
         action: 'hunt',
         preyId: r.id,
-        description: `Hunt visible rabbit ${r.id}, ${distance(wolf, r).toFixed(1)} tiles away. Track only while visible; catching it starts an 18-second eating cooldown.`,
+        description: `Hunt visible rabbit ${r.id}, ${distance(wolf, r).toFixed(1)} tiles away. Track only while visible; catching it starts a ${RULES.wolfEatCooldown}-second eating cooldown.`,
       });
     }
   }
-  for (const [dx, dy, name] of [
-    [1, 0, 'east'],
-    [-1, 0, 'west'],
-    [0, 1, 'south'],
-    [0, -1, 'north'],
-  ] as const) {
+  for (const [dx, dy, name] of directions(world)) {
     for (let steps = 5; steps >= 1; steps--) {
       const target = center({ x: wolf.x + dx * steps, y: wolf.y + dy * steps });
       if (
@@ -203,6 +237,14 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
       break;
     }
   }
+  // Rest goes last: models favor the first option, and resting never feeds a wolf.
+  choices.push({
+    id: 'rest',
+    action: 'rest',
+    description: dynamicWolf(world, wolf)
+      ? `Stop and wait. You still lose ${RULES.wolfMetabolism} energy per second and eat nothing; wolves starve at 0.`
+      : 'Stop and wait. Eating cooldown continues to expire.',
+  });
   return {
     wolf: {
       id: wolf.id,
@@ -238,6 +280,7 @@ export function applyWolfDecision(
   decision: Decision,
   choices: WolfCandidate[],
 ): boolean {
+  const RULES = rulesFor(world);
   const choice = choices.find((c) => c.id === decision.choice);
   if (!choice || decision.signal !== 'none') return false;
   let target: Point | undefined = choice.target;
@@ -262,4 +305,26 @@ export function applyWolfDecision(
   wolf.nextHunt = world.time;
   if (route.length && distance(wolf, center(wolf)) > 0.05) route.unshift(center(wolf));
   return true;
+}
+// A reachable, visible step of up to 6 tiles toward the nearest exposed rabbit within scent range.
+function scentStep(world: World, wolf: Wolf, sight: number) {
+  const exposed = world.rabbits.filter((r) => tileAt(world, r)?.kind !== 'shelter');
+  if (!exposed.length) return undefined;
+  const nearest = exposed.reduce((a, b) => (distance(wolf, a) <= distance(wolf, b) ? a : b));
+  const d = distance(wolf, nearest);
+  // Scent carries only so far: scattered survivors can escape notice and rebuild.
+  if (d > rulesFor(world).wolfScentRange) return undefined;
+  for (let steps = Math.min(6, Math.floor(d)); steps >= 1; steps--) {
+    const target = center({
+      x: wolf.x + ((nearest.x - wolf.x) / d) * steps,
+      y: wolf.y + ((nearest.y - wolf.y) / d) * steps,
+    });
+    if (
+      walkable(world, target) &&
+      visible(world, wolf, target, sight) &&
+      findRoute(world, wolf, target).length
+    )
+      return { target, distance: d };
+  }
+  return undefined;
 }

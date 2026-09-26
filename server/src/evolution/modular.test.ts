@@ -388,3 +388,37 @@ test('decision feed distinguishes late, cancelled, and failed responses', async 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a provider's long Retry-After pauses a group for at most a few seconds", async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'arena-retry-cap-'));
+  const runtime = new ArenaRuntime(dir);
+  const internal = runtime as unknown as {
+    tickTimer: ReturnType<typeof setInterval>;
+    backoff: Record<string, number>;
+    dispatch: (animal: (typeof runtime.world.rabbits)[number]) => Promise<void>;
+  };
+  clearInterval(internal.tickTimer);
+  const group = runtime.world.groups[0],
+    rabbit = runtime.world.rabbits[0];
+  const key = PROVIDER_KEYS[group.provider],
+    saved = process.env[key];
+  process.env[key] = 'fixture-key';
+  // The stall seen in a real run: HTTP 520 asking the client to wait ten minutes.
+  const mock = t.mock.method(
+    globalThis,
+    'fetch',
+    async () => new Response('bad gateway', { status: 520, headers: { 'retry-after': '600' } }),
+  );
+  try {
+    runtime.running = true;
+    const before = performance.now();
+    await internal.dispatch(rabbit);
+    assert.ok(internal.backoff[group.id] - before <= 5000 + 50);
+  } finally {
+    runtime.dispose();
+    mock.mock.restore();
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

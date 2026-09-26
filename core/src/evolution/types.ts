@@ -1,4 +1,6 @@
 export type Lineage = string;
+/** 'arena' compares configurable groups; 'predatorPrey' is the Lotka-Volterra preset (Jev rabbits vs Jev wolves). */
+export type Scenario = 'arena' | 'predatorPrey';
 export type Species = 'rabbit' | 'wolf';
 export type WolfLifeCycle = 'dynamic' | 'fixed';
 export type Controller = 'model' | 'deterministic';
@@ -317,6 +319,7 @@ export interface WorldEvent {
   lineage?: Lineage;
 }
 export interface World {
+  scenario?: Scenario;
   mapRevision?: number;
   groups: ModelGroup[];
   seed: number;
@@ -337,8 +340,13 @@ export interface World {
   reliefEvents: ReliefEvent[];
   nextReliefId: number;
   droughtReport?: DroughtReport;
+  /** Predator–prey migrants that have joined (an open population), shown in the record. */
+  migrants?: { wolves: number; rabbits: number; lastAt: number };
 }
 export interface RunConfig {
+  scenario?: Scenario;
+  /** World seconds per real second (1–4). Faster cycles, same calls per real second. */
+  timeScale?: number;
   deadlineMs: number;
   decisionIntervalMs: number;
   maxInFlight: number;

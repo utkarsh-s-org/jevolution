@@ -1,4 +1,4 @@
-import { GENE_NAMES, GRID, MAX_POPULATION, RULES } from './constants.js';
+import { GENE_NAMES, GRID, RULES as BASE_RULES, type Rules, rulesFor } from './constants.js';
 import {
   finishDrought,
   recordRelief,
@@ -32,6 +32,9 @@ import {
   cell,
   center,
   createRabbit,
+  createWolf,
+  directions,
+  disperse,
   distance,
   findRoute,
   groupPopulation,
@@ -42,7 +45,7 @@ import {
 } from './world.js';
 
 export const vision = (r: Rabbit) => 4 + Math.floor(r.genes.vigilance * 6);
-export const mature = (r: Rabbit) =>
+export const mature = (r: Rabbit, RULES: Rules = BASE_RULES) =>
   r.age >= RULES.maturity &&
   r.cooldown <= 0 &&
   r.energy >= RULES.breedEnergy &&
@@ -70,6 +73,7 @@ function nearbyTiles(world: World, r: Rabbit) {
 // Memory samples only what this rabbit sees at decision time. Never read unseen
 // resource amounts or refresh an old sighting simply because it is remembered.
 function remember(world: World, r: Rabbit, tiles: Tile[], wolves: Wolf[]) {
+  const RULES = rulesFor(world);
   r.memory = r.memory.filter((m) => world.time - m.observedAt < RULES.memoryLife[m.kind]);
   const seen = new Map(tiles.map((t) => [`${t.x},${t.y}`, t]));
   r.memory = r.memory.filter((m) => {
@@ -137,6 +141,7 @@ function remember(world: World, r: Rabbit, tiles: Tile[], wolves: Wolf[]) {
   );
 }
 export function observe(world: World, r: Rabbit): Observation {
+  const RULES = rulesFor(world);
   const radius = vision(r);
   const seenWolves = world.wolves.filter((w) => visible(world, r, w, radius));
   const wolves = seenWolves.map((w) => ({ x: w.x, y: w.y }));
@@ -171,9 +176,9 @@ export function observe(world: World, r: Rabbit): Observation {
     });
   };
   // Listed first after rest: offspring are how a lineage grows.
-  if (mature(r)) {
+  if (mature(r, RULES)) {
     const mates = neighbors
-      .filter((a) => a.lineage === r.lineage && mature(a))
+      .filter((a) => a.lineage === r.lineage && mature(a, RULES))
       .sort((a, b) => distance(r, a) - distance(r, b))
       .slice(0, 2);
     for (const m of mates)
@@ -223,12 +228,7 @@ export function observe(world: World, r: Rabbit): Observation {
       t,
       `Hide in ${t.kind}. Shelters exclude attacks; forest reduces wolf detection to 2 tiles while hiding. Distance ${distance(r, t).toFixed(1)}.`,
     );
-  for (const [dx, dy, direction] of [
-    [1, 0, 'east'],
-    [-1, 0, 'west'],
-    [0, 1, 'south'],
-    [0, -1, 'north'],
-  ] as const) {
+  for (const [dx, dy, direction] of directions(world)) {
     const targets = tiles.filter((t) => (dx ? (t.x - r.x) * dx > 2 : (t.y - r.y) * dy > 2));
     const target = targets.sort(
       (a, b) =>
@@ -268,7 +268,7 @@ export function observe(world: World, r: Rabbit): Observation {
       undefined,
       leader.id,
     );
-  choices.push(...reliefChoices(world, r, neighbors, tiles, radius));
+  if (RULES.reliefEnabled) choices.push(...reliefChoices(world, r, neighbors, tiles, radius));
   return {
     caches: world.caches.filter((c) => visible(world, r, c, radius)),
     rabbit: {
@@ -317,13 +317,16 @@ export function applyDecision(
   decision: Decision,
   choices: Candidate[],
 ): boolean {
+  const RULES = rulesFor(world);
   const chosen = choices.find((c) => c.id === decision.choice);
   if (!chosen || !['none', 'danger', 'food', 'follow', 'help'].includes(decision.signal))
     return false;
   if (
     chosen.action === 'mate' &&
-    (!mature(r) ||
-      !world.rabbits.some((a) => a.id === chosen.mateId && a.lineage === r.lineage && mature(a)))
+    (!mature(r, RULES) ||
+      !world.rabbits.some(
+        (a) => a.id === chosen.mateId && a.lineage === r.lineage && mature(a, RULES),
+      ))
   )
     return false;
   if (
@@ -427,7 +430,22 @@ function kill(
   );
 }
 function reproduce(world: World, a: Rabbit, b: Rabbit) {
-  if (world.rabbits.length >= MAX_POPULATION) return;
+  const RULES = rulesFor(world);
+  if (world.rabbits.length >= RULES.maxPopulation) return;
+  // Crowding makes each birth attempt less likely to succeed (logistic growth), so rabbits level
+  // off below the hard cap instead of pinning at it. A failed attempt still waits a cooldown.
+  const crowded = Math.max(
+    RULES.rabbitCapacity ? world.rabbits.length / RULES.rabbitCapacity : 0,
+    RULES.localCapacity
+      ? world.rabbits.filter((r) => distance(r, a) <= RULES.localCrowdRadius).length /
+          RULES.localCapacity
+      : 0,
+  );
+  if (crowded && random(world) < crowded) {
+    for (const r of new Set([a, b]))
+      r.cooldown = RULES.breedCooldown * (1.3 - 0.6 * r.genes.fertility);
+    return;
+  }
   const free = [
     [1, 0],
     [-1, 0],
@@ -455,9 +473,10 @@ function reproduce(world: World, a: Rabbit, b: Rabbit) {
     [a.id, b.id],
   );
   child.nextDecision = world.time;
+  disperse(world, child);
   world.rabbits.push(child);
   world.stats[a.lineage].births++;
-  for (const r of [a, b]) {
+  for (const r of new Set([a, b])) {
     r.energy -= RULES.breedCost + r.genes.fertility * 12;
     r.cooldown = RULES.breedCooldown * (1.3 - 0.6 * r.genes.fertility);
     r.action = 'rest';
@@ -471,6 +490,7 @@ function reproduce(world: World, a: Rabbit, b: Rabbit) {
   );
 }
 export function stepWorld(world: World, dt: number) {
+  const RULES = rulesFor(world);
   world.time += dt;
   const drought = world.time < world.droughtUntil;
   for (const t of world.tiles)
@@ -558,17 +578,19 @@ export function stepWorld(world: World, dt: number) {
       }
       if (r.action === 'drink' && nearWater(world, r))
         r.water = Math.min(100, r.water + dt * RULES.drinkRate);
-      if (r.action === 'mate' && mature(r)) {
-        const mate = world.rabbits.find(
-          (b) =>
-            b.id === r.mateId &&
-            b.id !== r.id &&
-            b.lineage === r.lineage &&
-            b.action === 'mate' &&
-            b.mateId === r.id &&
-            mature(b) &&
-            distance(r, b) < RULES.mateDistance,
-        );
+      // Predator–prey: births are a population rate — any mature pair close together breeds.
+      const passive = !!RULES.passiveBreeding;
+      if ((r.action === 'mate' || passive) && mature(r, RULES)) {
+        const mate = RULES.rabbitSoloBirths
+          ? r
+          : world.rabbits.find(
+              (b) =>
+                b.id !== r.id &&
+                b.lineage === r.lineage &&
+                (passive || (b.id === r.mateId && b.action === 'mate' && b.mateId === r.id)) &&
+                mature(b, RULES) &&
+                distance(r, b) < (passive ? RULES.preyMateDistance : RULES.mateDistance),
+            );
         const threatened = world.wolves.some((w) => distance(w, r) < 4);
         if (mate && !threatened) reproduce(world, r, mate);
       }
@@ -645,13 +667,24 @@ export function stepWorld(world: World, dt: number) {
         (tileAt(world, w)?.kind === 'forest' ? RULES.forestSpeed : 1),
       dt,
     );
-    const prey = world.rabbits.find((r) => r.id === w.target);
-    if (
-      prey &&
-      w.cooldown <= 0 &&
-      distance(w, prey) < RULES.wolfCapture &&
-      tileAt(world, prey)?.kind !== 'shelter'
-    ) {
+    const reach = (r: Rabbit) =>
+      distance(w, r) < RULES.wolfCapture && tileAt(world, r)?.kind !== 'shelter';
+    const chased = world.rabbits.find((r) => r.id === w.target);
+    // Predator–prey: kills follow encounters (Lotka-Volterra's β·R·W) — the chased rabbit or any
+    // exposed rabbit the wolf reaches, so more rabbits nearby means more meals.
+    const prey =
+      chased && reach(chased)
+        ? chased
+        : RULES.wolfEncounterKills && w.lineage
+          ? world.rabbits.find(reach)
+          : undefined;
+    // Predator interference: crowded wolves get in each other's way, so each catches less.
+    const rivals =
+      prey && RULES.wolfInterference
+        ? world.wolves.filter((o) => o !== w && distance(o, w) <= 4).length
+        : 0;
+    const interfered = rivals > 0 && random(world) >= 1 / (1 + RULES.wolfInterference * rivals);
+    if (prey && w.cooldown <= 0 && !interfered) {
       kill(world, prey, 'predation');
       caught = true;
       if (w.lineage && world.stats[w.lineage]) world.stats[w.lineage].kills++;
@@ -663,6 +696,7 @@ export function stepWorld(world: World, dt: number) {
     finishWolfLife(world, w, moved, caught);
   }
   reproduceWolves(world);
+  migrate(world);
   finishDrought(world);
   if (world.time - world.lastSample >= RULES.historySeconds) {
     world.lastSample = world.time;
@@ -684,4 +718,61 @@ export function meanGenes(world: World, lineage: Lineage): Genes | null {
         ]),
       ) as Genes)
     : null;
+}
+// Predator–prey is an open population: a steady trickle of migrants joins beside an animal of
+// their own kind (from the map edge only if none are left), whatever the current numbers.
+function migrate(world: World) {
+  const RULES = rulesFor(world);
+  if (!RULES.migrationInterval) return;
+  const migrants = (world.migrants ??= { wolves: 0, rabbits: 0, lastAt: 0 });
+  if (world.time - migrants.lastAt < RULES.migrationInterval) return;
+  migrants.lastAt = world.time;
+  const edge = 4;
+  const edgeTiles = world.tiles.filter(
+    (t) =>
+      t.kind === 'grass' &&
+      walkable(world, t) &&
+      (t.x < edge || t.y < edge || t.x >= GRID - edge || t.y >= GRID - edge),
+  );
+  const spotBeside = (animals: Point[]) => {
+    for (let attempt = 0; attempt < 8 && animals.length; attempt++) {
+      const host = animals[Math.floor(random(world) * animals.length)];
+      const spot = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]
+        .map(([x, y]) => center({ x: host.x + x, y: host.y + y }))
+        .find(
+          (p) =>
+            walkable(world, p) &&
+            tileAt(world, p)?.kind !== 'shelter' &&
+            ![...world.rabbits, ...world.wolves].some((a) => distance(a, p) < 0.5),
+        );
+      if (spot) return spot;
+    }
+    return edgeTiles.length ? edgeTiles[Math.floor(random(world) * edgeTiles.length)] : undefined;
+  };
+  const wolfGroup = world.groups.find((g) => g.species === 'wolf');
+  for (let i = 0; wolfGroup && i < RULES.migrationWolves; i++) {
+    const spot = spotBeside(world.wolves);
+    if (!spot) break;
+    const wolf = createWolf(world, wolfGroup.id, spot);
+    wolf.reproductionCooldown = 0; // the founders' pup delay is for the opening only
+    world.wolves.push(wolf);
+    migrants.wolves++;
+  }
+  const rabbitGroup = world.groups.find((g) => g.species !== 'wolf')!;
+  for (let i = 0; i < RULES.migrationRabbits; i++) {
+    const spot = spotBeside(world.rabbits);
+    if (!spot) break;
+    const genes = Object.fromEntries(
+      GENE_NAMES.map((k) => [k, 0.2 + random(world) * 0.6]),
+    ) as Genes;
+    const rabbit = createRabbit(world, rabbitGroup.id, spot, genes);
+    rabbit.nextDecision = world.time;
+    world.rabbits.push(rabbit);
+    migrants.rabbits++;
+  }
 }

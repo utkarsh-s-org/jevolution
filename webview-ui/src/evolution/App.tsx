@@ -4,12 +4,15 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_GROUPS,
   GRID,
+  PREDATOR_PREY_GROUPS,
   PROVIDER_KEYS,
+  SCENARIO_CONFIG,
 } from '../../../core/src/evolution/constants.js';
 import type {
   Lineage,
   ModelGroup,
   RunConfig,
+  Scenario,
   Snapshot,
 } from '../../../core/src/evolution/types.js';
 import { groupPopulation } from '../../../core/src/evolution/world.js';
@@ -512,9 +515,11 @@ export default function App() {
                     <span>
                       <i className="lineage-dot depleted" /> Depleted
                     </span>
-                    <span>
-                      <i className="lineage-dot food-cargo" /> Carried food / caches
-                    </span>
+                    {world?.scenario !== 'predatorPrey' && (
+                      <span>
+                        <i className="lineage-dot food-cargo" /> Carried food / caches
+                      </span>
+                    )}
                     <span className="legend-end">{total} living rabbits</span>
                   </div>
                   <div className="signal-legend" aria-label="Rabbit communication legend">
@@ -537,12 +542,14 @@ export default function App() {
                       </b>{' '}
                       Follow me
                     </span>
-                    <span>
-                      <b className="signal-symbol help" aria-hidden="true">
-                        ?
-                      </b>{' '}
-                      Need food
-                    </span>
+                    {world?.scenario !== 'predatorPrey' && (
+                      <span>
+                        <b className="signal-symbol help" aria-hidden="true">
+                          ?
+                        </b>{' '}
+                        Need food
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -636,11 +643,14 @@ export default function App() {
                   selected={selected}
                   onSelect={selectAnimal}
                 />
-                <ReliefPanel
-                  snapshot={replay.shown}
-                  selected={world?.rabbits.some((r) => r.id === selected) ? selected : null}
-                  onSelect={selectAnimal}
-                />
+                {/* Predator–prey turns food sharing off, so its panel would stay empty. */}
+                {world?.scenario !== 'predatorPrey' && (
+                  <ReliefPanel
+                    snapshot={replay.shown}
+                    selected={world?.rabbits.some((r) => r.id === selected) ? selected : null}
+                    onSelect={selectAnimal}
+                  />
+                )}
               </div>
             </div>
           </section>
@@ -783,11 +793,41 @@ export default function App() {
               Settings apply to a new run. Export the current run before resetting. Pause the
               ecosystem to change them.
             </p>
-            <ModelSettings
-              groups={groupsDraft}
-              onChange={setGroupsDraft}
-              ready={liveStatus?.providerReady}
-            />
+            <label className="scenario-setting">
+              Scenario
+              <select
+                value={config.scenario ?? 'arena'}
+                onChange={(e) => {
+                  const next = e.target.value as Scenario;
+                  // Each scenario starts from its own defaults; the arena keeps its roster.
+                  setConfig({ ...SCENARIO_CONFIG[next] });
+                  setGroupsDraft(
+                    next === 'predatorPrey'
+                      ? PREDATOR_PREY_GROUPS
+                      : snapshot?.world.scenario === 'predatorPrey'
+                        ? DEFAULT_GROUPS
+                        : groupsDraft,
+                  );
+                }}
+              >
+                <option value="arena">Model arena (configure groups)</option>
+                <option value="predatorPrey">Predator–prey (Jev wolves + Jev rabbits)</option>
+              </select>
+            </label>
+            {config.scenario === 'predatorPrey' ? (
+              <p className="small-note">
+                Preset: 70 Jev rabbits and 8 Jev wolves. Rabbits breed on their own; wolves have
+                pups from kills and starve without them, so both populations rise and fall in
+                cycles. Like a real open habitat, a wolf and two rabbits join every 20 seconds
+                beside their own kind. Uses your TypeSafe key only.
+              </p>
+            ) : (
+              <ModelSettings
+                groups={groupsDraft}
+                onChange={setGroupsDraft}
+                ready={liveStatus?.providerReady}
+              />
+            )}
             <div className="settings-grid">
               <div className="seed-setting">
                 <label htmlFor="habitat-seed">Habitat seed</label>
@@ -849,6 +889,7 @@ export default function App() {
                   },
                   { key: 'maxRequests', label: 'Maximum calls / run', min: 2, max: 20000 },
                   { key: 'maxSeconds', label: 'Maximum duration (seconds)', min: 10, max: 1200 },
+                  { key: 'timeScale', label: 'Simulation speed (×)', min: 1, max: 4 },
                 ] as const
               ).map((item) => (
                 <label key={item.key}>
@@ -857,7 +898,7 @@ export default function App() {
                     type="number"
                     min={item.min}
                     max={item.max}
-                    value={config[item.key]}
+                    value={config[item.key] ?? 1}
                     onChange={(e) => setConfig({ ...config, [item.key]: Number(e.target.value) })}
                   />
                 </label>

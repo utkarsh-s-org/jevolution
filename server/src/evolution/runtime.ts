@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 
-import { DEFAULT_CONFIG, RULES, validateGroups } from '../../../core/src/evolution/constants.js';
+import {
+  DEFAULT_CONFIG,
+  PREDATOR_PREY_GROUPS,
+  RULES,
+  rulesFor,
+  validateGroups,
+} from '../../../core/src/evolution/constants.js';
 import { editWorldMap, validateMapEdits } from '../../../core/src/evolution/mapEditor.js';
 import { applyDecision, observe, stepWorld } from '../../../core/src/evolution/simulation.js';
 import type {
@@ -26,6 +32,8 @@ import {
   providerReadiness,
 } from './models.js';
 import { ReplayStore } from './replay.js';
+
+const RETRY_AFTER_CAP_MS = 5000;
 
 interface Pending {
   lineage: Lineage;
@@ -117,9 +125,13 @@ export class ArenaRuntime {
       config: { ...this.config },
       runId: this.runId,
       connections: this.connections,
-      estimatedCost: knownPrice
-        ? (a.jev.inputTokens * 0.042 + a.claude.inputTokens + a.claude.outputTokens * 5) / 1e6
-        : null,
+      estimatedCost:
+        this.world.scenario === 'predatorPrey'
+          ? // Every predator–prey call is Jev (TypeSafe), priced like the arena's Jev group.
+            (Object.values(a).reduce((sum, s) => sum + s.inputTokens, 0) * 0.042) / 1e6
+          : knownPrice
+            ? (a.jev.inputTokens * 0.042 + a.claude.inputTokens + a.claude.outputTokens * 5) / 1e6
+            : null,
     };
   }
   snapshot(): Snapshot {
@@ -196,9 +208,13 @@ export class ArenaRuntime {
   reset(seed: number, config: RunConfig, roster: ModelGroup[] = this.world.groups) {
     if (this.active.size)
       throw new Error('Pending calls are still cancelling. Try resetting in a moment.');
-    const groups = validateGroups(roster);
+    // Predator–prey always runs its preset: Jev rabbits vs Jev wolves with a wolf life cycle.
+    const predatorPrey = config.scenario === 'predatorPrey';
+    const groups = predatorPrey
+      ? PREDATOR_PREY_GROUPS.map((g) => ({ ...g, model: process.env.JEV_MODEL || g.model }))
+      : validateGroups(roster);
     this.pause();
-    this.world = createWorld(seed, groups);
+    this.world = createWorld(seed, groups, config.scenario);
     this.config = { ...config };
     this.runId = randomUUID();
     this.decisions.clear();
@@ -270,7 +286,8 @@ export class ArenaRuntime {
       );
       return;
     }
-    let remaining = elapsed;
+    // Sim speed: world seconds per real second. Calls per real second are unchanged.
+    let remaining = elapsed * (this.config.timeScale ?? 1);
     while (remaining > 0) {
       const dt = Math.min(remaining, RULES.tickMs / 1000);
       stepWorld(this.world, dt);
@@ -362,7 +379,10 @@ export class ArenaRuntime {
       observation,
     });
     try {
-      const result = await choose(group, observation, controller.signal);
+      const result = await choose(group, observation, controller.signal, {
+        relief: !!rulesFor(world).reliefEnabled,
+        predatorPrey: world.scenario === 'predatorPrey',
+      });
       stats.inputTokens += result.inputTokens;
       stats.outputTokens += result.outputTokens;
       stats.latencies.push(result.latencyMs);
@@ -467,7 +487,9 @@ export class ArenaRuntime {
         this.backoff[lineage] =
           performance.now() +
           Math.max(
-            error instanceof ProviderError ? error.retryAfterMs : 0,
+            // Honor a provider's Retry-After, but never stall a group for more than a few
+            // seconds: an uncapped wait froze every wolf for the rest of a run.
+            error instanceof ProviderError ? Math.min(RETRY_AFTER_CAP_MS, error.retryAfterMs) : 0,
             Math.min(30000, 1000 * 2 ** this.failures[lineage]),
           );
         if (

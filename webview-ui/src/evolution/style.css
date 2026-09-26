@@ -1003,6 +1003,17 @@ h2 {
   font-size: 13px;
   color: var(--muted);
 }
+.scenario-setting {
+  display: block;
+  margin: 20px 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.scenario-setting select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
 .seed-setting {
   grid-column: 1 / -1;
   min-width: 0;
