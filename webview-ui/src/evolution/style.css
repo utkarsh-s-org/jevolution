@@ -3286,3 +3286,16 @@ select {
     justify-content: end;
   }
 }
+.public-preview-banner {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid #46543e;
+  background: #1b281e;
+  color: #d4e8a3;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.public-preview-banner span {
+  display: block;
+  color: #a7b59b;
+}

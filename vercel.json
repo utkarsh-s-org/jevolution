@@ -1,5 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --no-audit --no-fund",
+  "buildCommand": "node scripts/build-arena-public.mjs",
+  "outputDirectory": "dist/arena",
   "git": {
     "deploymentEnabled": false
   }

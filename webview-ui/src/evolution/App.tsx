@@ -24,6 +24,7 @@ import { MapEditor } from './MapEditor.js';
 import { ModelSettings } from './ModelSettings.js';
 import { OrganismInspector } from './OrganismInspector.js';
 import { PopulationChart } from './PopulationChart.js';
+import { createPublicPreview, PUBLIC_PREVIEW } from './publicPreview.js';
 import { RabbitDistributions } from './RabbitDistributions.js';
 import { ReliefPanel } from './ReliefPanel.js';
 import { attachRenderer } from './renderer.js';
@@ -38,7 +39,9 @@ const time = (seconds: number) =>
     .toString()
     .padStart(2, '0')}`;
 export default function App() {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(() =>
+    PUBLIC_PREVIEW ? createPublicPreview() : null,
+  );
   const replay = useReplay(snapshot);
   const editor = useMapEditor(snapshot, replay.reviewing, setSnapshot);
   const editing = useRef(editor);
@@ -104,6 +107,7 @@ export default function App() {
     return () => observer.disconnect();
   }, [view, editor.open]);
   useEffect(() => {
+    if (PUBLIC_PREVIEW) return;
     const events = new EventSource('/api/arena/events');
     events.onmessage = (event) => {
       const data = JSON.parse(event.data) as Snapshot;
@@ -141,6 +145,7 @@ export default function App() {
     return () => instance.dispose();
   }, []);
   async function control(action: string) {
+    if (PUBLIC_PREVIEW) return;
     if (action === 'start' || action === 'reset') replay.goLive();
     setBusy(true);
     setError('');
@@ -297,7 +302,7 @@ export default function App() {
             className="icon-button"
             title="Run settings and reset"
             aria-label="Open run settings"
-            disabled={editor.open}
+            disabled={editor.open || PUBLIC_PREVIEW}
             onClick={() => {
               setConfig(liveStatus?.config || DEFAULT_CONFIG);
               setSeed(snapshot?.world.seed || 271828);
@@ -339,9 +344,11 @@ export default function App() {
             </svg>
           </button>
         </div>
-        <a className="export-link" href="/api/arena/export" download>
-          Export run ↓
-        </a>
+        {!PUBLIC_PREVIEW && (
+          <a className="export-link" href="/api/arena/export" download>
+            Export run ↓
+          </a>
+        )}
       </div>
       {editor.open && (
         <div className="editor-top-hint">Paused · paint to preview · apply when ready</div>
@@ -412,10 +419,17 @@ export default function App() {
         </nav>
         <div className="top-meta">
           <span className={`connection-dot ${connected ? 'connected' : ''}`} />
-          {connected ? 'LOCAL SERVER' : 'CONNECTING'}
+          {PUBLIC_PREVIEW ? 'PUBLIC PREVIEW' : connected ? 'LOCAL SERVER' : 'CONNECTING'}
         </div>
       </header>
       <main className={view === 'habitat' ? 'habitat-main' : undefined}>
+        {PUBLIC_PREVIEW && (
+          <aside className="public-preview-banner">
+            <strong>AI agents in a living ecosystem.</strong> Explore the habitat, inspect animals,
+            and read the science in Field guide.
+            <span>Paused preview · live simulation backend not connected.</span>
+          </aside>
+        )}
         {view !== 'habitat' && populationSummary}
         {error && (
           <div className="error-banner" role="alert">
@@ -679,7 +693,7 @@ export default function App() {
           </section>
         )}
         {view === 'guide' && <FieldGuide onReturn={() => navigate('habitat')} />}
-        {view === 'analytics' && missingKeys && (
+        {view === 'analytics' && missingKeys && !PUBLIC_PREVIEW && (
           <section className="setup-panel">
             <div>
               <span className="eyebrow">CONNECT YOUR MODELS</span>
