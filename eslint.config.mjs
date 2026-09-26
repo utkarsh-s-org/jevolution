@@ -5,7 +5,7 @@ import pixelAgentsPlugin from './eslint-rules/pixel-agents-rules.mjs';
 
 export default [
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,mts}'],
   },
   {
     plugins: {

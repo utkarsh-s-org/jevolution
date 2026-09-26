@@ -18,7 +18,9 @@ import { ArenaRuntime } from './runtime.js';
 const root = process.cwd();
 function loadKeys() {
   try {
-    const parsed = parseEnv(readFileSync(path.join(root, '.env.arena'), 'utf8'));
+    const parsed = parseEnv(
+      readFileSync(process.env.ARENA_ENV_FILE || path.join(root, '.env.arena'), 'utf8'),
+    );
     for (const key of [...Object.values(PROVIDER_KEYS), 'JEV_MODEL', 'CLAUDE_MODEL'])
       if (Object.hasOwn(parsed, key)) process.env[key] = parsed[key];
   } catch (error) {
@@ -51,12 +53,28 @@ function configFrom(input: Record<string, unknown>): RunConfig {
     throw new Error('Invalid scenario.');
   if (input.scenario) next.scenario = input.scenario as RunConfig['scenario'];
   next.experimentPreview = validateExperimentPreview(input.experimentPreview);
+  if (input.coordination !== undefined) {
+    if (!['off', 'local', 'a2a'].includes(String(input.coordination)))
+      throw new Error('Invalid coordination mode.');
+    next.coordination = input.coordination as RunConfig['coordination'];
+  }
+  if (input.maxCostUsd !== undefined) {
+    if (
+      typeof input.maxCostUsd !== 'number' ||
+      !Number.isFinite(input.maxCostUsd) ||
+      input.maxCostUsd <= 0 ||
+      input.maxCostUsd > 100
+    )
+      throw new Error('Dollar limit must be greater than 0 and at most 100.');
+    next.maxCostUsd = input.maxCostUsd;
+  }
   return next;
 }
-async function main() {
+export async function startArenaServer(
+  runtime = new ArenaRuntime(path.join(root, 'logs/evolution')),
+) {
   loadKeys();
   const port = Number(process.env.ARENA_PORT || 4317);
-  const runtime = new ArenaRuntime(path.join(root, 'logs/evolution'));
   const app = Fastify({ logger: false, bodyLimit: 16384 });
   const allowed = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   app.addHook('onRequest', async (request, reply) => {
@@ -101,6 +119,7 @@ async function main() {
       if (!body || typeof body !== 'object') throw new Error('JSON object required');
       if (body.action === 'start') {
         loadKeys();
+        await runtime.prepare();
         runtime.start();
       } else if (body.action === 'pause') runtime.pause();
       else if (body.action === 'drought') runtime.drought();
@@ -190,6 +209,15 @@ async function main() {
       clearInterval(heartbeat);
     });
   });
+  app.get('/api/arena/coordination/:id', async (request, reply) => {
+    const { runId } = request.query as { runId?: string };
+    if (runId !== runtime.runId) return reply.code(409).send({ error: 'Run changed.' });
+    try {
+      return await runtime.inspectTask((request.params as { id: string }).id);
+    } catch {
+      return reply.code(400).send({ error: 'Task unavailable from peer service.' });
+    }
+  });
   app.get('/api/arena/export', async (_request, reply) =>
     reply
       .header('content-disposition', `attachment; filename="evolution-${runtime.runId}.json"`)
@@ -214,8 +242,10 @@ async function main() {
   console.log(
     `[Evolution Arena] http://127.0.0.1:${port} · API keys remain server-side · Ctrl+C to stop`,
   );
+  return app;
 }
-void main().catch((error) => {
-  console.error('[Evolution Arena]', error instanceof Error ? error.message : 'Startup failed');
-  process.exitCode = 1;
-});
+if (require.main === module)
+  void startArenaServer().catch((error) => {
+    console.error('[Evolution Arena]', error instanceof Error ? error.message : 'Startup failed');
+    process.exitCode = 1;
+  });

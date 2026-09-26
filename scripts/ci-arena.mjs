@@ -40,6 +40,9 @@ run([
 // This includes TypeScript checks for api/, server/, core/, and the browser UI.
 run(['scripts/build-arena-public.mjs']);
 
+// Official SDK lifecycle checks replay recorded requests, without model API calls.
+run(['scripts/verify-a2a-recorded.mjs']);
+
 const assets = readdirSync('dist/arena/assets');
 if (!assets.some((name) => /^hosted\.worker-.*\.js$/.test(name)))
   throw new Error('Hosted simulation worker is missing from the build.');

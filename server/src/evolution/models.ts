@@ -72,11 +72,15 @@ export async function choose(
   group: ModelGroup,
   observation: ModelObservation,
   signal: AbortSignal,
-  { relief = true, predatorPrey = false }: { relief?: boolean; predatorPrey?: boolean } = {},
+  {
+    relief = true,
+    predatorPrey = false,
+    cooperation = false,
+  }: { relief?: boolean; predatorPrey?: boolean; cooperation?: boolean } = {},
 ): Promise<Result> {
   if (group.controller === 'deterministic')
     throw new ProviderError('Deterministic wolves do not use a model API');
-  const instructions =
+  let instructions =
     'wolf' in observation
       ? predatorPrey
         ? PREDATOR_PREY_WOLF_INSTRUCTIONS
@@ -84,6 +88,27 @@ export async function choose(
       : relief
         ? INSTRUCTIONS
         : PREY_INSTRUCTIONS;
+  if (cooperation && !('wolf' in observation)) {
+    instructions = instructions
+      .replace(
+        'Survive, maintain food energy and hydration, and reproduce with your lineage.',
+        'Keep the rabbit community alive across all model groups, while maintaining your own food energy and hydration. Weigh the benefit of helping against risk and cost; needless sacrifice is not required.',
+      )
+      .replace(
+        'Choose the action and signal that best balance your survival and descendants.',
+        'Choose the action and signal that best support community survival, including your own.',
+      )
+      .replace(
+        'Foraging and drinking continue on arrival.',
+        'Foraging lasts a short bout after arrival and then stops until a new decision; drinking continues on arrival.',
+      )
+      .replace(
+        'Rest conserves energy but cannot replenish it.',
+        'Rest avoids movement cost but still consumes baseline metabolism and cannot replenish energy.',
+      );
+    instructions +=
+      ' Your legal choices may include requesting food, accepting a request, continuing a delivery or declining it. Acceptance commits your current cargo and movement; choosing a different action can abandon the task. Successful delivery is determined by actual food transfer, not a promise. When you have surplus energy, consider collecting food to carry for nearby hungry rabbits. Only use the supplied local inbox and choices. Requests never force you to comply.';
+  }
   // "Need food" is offered only to a rabbit that is actually hungry, and only with relief on.
   const hungry =
     relief && 'rabbit' in observation && observation.rabbit.energy < RULES.hungryEnergy;

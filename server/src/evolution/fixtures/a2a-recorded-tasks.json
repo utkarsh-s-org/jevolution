@@ -1,0 +1,91 @@
+{
+  "provenance": {
+    "runId": "e8712d68-fa1a-467f-b5bf-782d3bddf933",
+    "recordedAt": "2026-09-26",
+    "sourceArtifact": "a2a-fixed-result.json",
+    "sha256": "df56c016dfbfb2b2778e1023e733c5b8d8a2bd4d3e03f322df0651397463c0ec",
+    "description": "Actual Jev-selected food request/acceptance and engine receipt; second actual request canceled when the bounded run ended. Protocol replay is not a new model-quality evaluation."
+  },
+  "tasks": [
+    {
+      "id": "ce3a4547-cedf-4f59-9358-49c1e8f3fdcd",
+      "runId": "e8712d68-fa1a-467f-b5bf-782d3bddf933",
+      "requester": 69,
+      "helper": 9,
+      "requesterGroup": "jev",
+      "helperGroup": "jev",
+      "createdAt": 56.9690112079989,
+      "expiresAt": 76.9690112079989,
+      "state": "completed",
+      "decisionId": "dbe315e8-6f37-4a0f-9e62-202af988c667",
+      "history": [
+        {
+          "time": 56.9690112079989,
+          "state": "sending",
+          "reason": "Model requested a food delivery."
+        },
+        {
+          "time": 57.1742744579989,
+          "state": "submitted",
+          "reason": "Request arrived in the helper inbox."
+        },
+        {
+          "time": 58.241830124998835,
+          "state": "working",
+          "reason": "Helper model accepted and chose a share action."
+        },
+        {
+          "time": 58.29284062499883,
+          "state": "completed",
+          "reason": "Food transfer verified by the simulation engine."
+        }
+      ],
+      "reason": "Food transfer verified by the simulation engine.",
+      "protocolTaskId": "78c721f7-590f-4657-866d-52696194ca46",
+      "transportMs": 12.284166999997979,
+      "acceptedDecisionId": "1a10e7b5-dbc0-4988-93ba-3b5a2eeb069f",
+      "acceptedAt": 58.241830124998835,
+      "receipt": {
+        "eventId": 309,
+        "amount": 4,
+        "energyBefore": 25.675328966414725,
+        "energyAfter": 41.675328966414725,
+        "time": 58.29183012499883
+      },
+      "finishedAt": 58.29284062499883
+    },
+    {
+      "id": "b481bde4-cca4-4acc-9d41-e99f6a78c0e2",
+      "runId": "e8712d68-fa1a-467f-b5bf-782d3bddf933",
+      "requester": 59,
+      "helper": 93,
+      "requesterGroup": "jev",
+      "helperGroup": "jev",
+      "createdAt": 59.51414904199876,
+      "expiresAt": 79.51414904199876,
+      "state": "canceled",
+      "decisionId": "5fd55a11-d882-47d4-b7e7-0a651f72e4f2",
+      "history": [
+        {
+          "time": 59.51414904199876,
+          "state": "sending",
+          "reason": "Model requested a food delivery."
+        },
+        {
+          "time": 59.71899320799875,
+          "state": "submitted",
+          "reason": "Request arrived in the helper inbox."
+        },
+        {
+          "time": 60.38201554199871,
+          "state": "canceled",
+          "reason": "Run complete · export your observations or reset."
+        }
+      ],
+      "reason": "Run complete · export your observations or reset.",
+      "protocolTaskId": "8dd0498c-ebf8-4eaa-8bb5-965eb01df96d",
+      "transportMs": 1.093165999998746,
+      "finishedAt": 60.38201554199871
+    }
+  ]
+}

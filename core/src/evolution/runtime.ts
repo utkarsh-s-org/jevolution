@@ -10,7 +10,12 @@ import { DecisionJournal } from './decisions.js';
 import { validateExperimentPreview } from './experimentPreview.js';
 import { editWorldMap, validateMapEdits } from './mapEditor.js';
 import { ProviderError } from './providerError.js';
-import type { RuntimeReplay, RuntimeServices } from './runtimePorts.js';
+import type {
+  RuntimeBudget,
+  RuntimeCoordination,
+  RuntimeReplay,
+  RuntimeServices,
+} from './runtimePorts.js';
 import { applyDecision, observe, stepWorld } from './simulation.js';
 import type {
   DecisionTrace,
@@ -41,6 +46,41 @@ export class SimulationRuntime {
   connections = 0;
   decisions = new DecisionJournal();
   private epoch = 0;
+  private coordinator?: RuntimeCoordination;
+  private preparing?: Promise<void>;
+  private budget?: RuntimeBudget;
+  private budgetStopped = false;
+  async prepare() {
+    const mode = this.config.coordination || 'off';
+    if (mode === 'off' || this.coordinator) return;
+    if (this.preparing) return this.preparing;
+    if (!this.services.createCoordination)
+      throw new Error('Food coordination requires the local arena server.');
+    if (this.config.scenario === 'predatorPrey')
+      throw new Error('Food coordination requires the model arena scenario.');
+    if (Object.values(this.readiness()).some((ready) => !ready))
+      throw new Error('Configure the provider API keys before preparing agent services.');
+    this.preparing = this.services
+      .createCoordination({
+        mode,
+        runId: this.runId,
+        world: () => this.world,
+        record: (event) => this.record(event),
+        onFailure: (message) => this.pause(message),
+      })
+      .then((coordinator) => {
+        this.coordinator = coordinator;
+        this.captureReplay();
+      })
+      .finally(() => {
+        this.preparing = undefined;
+      });
+    return this.preparing;
+  }
+  async inspectTask(id: string) {
+    if (!this.coordinator) throw new Error('Coordination is not enabled.');
+    return this.coordinator.inspect(id);
+  }
   private active = new Map<string, Pending>();
   private failures: Record<Lineage, number> = {};
   private backoff: Record<Lineage, number> = {};
@@ -56,6 +96,7 @@ export class SimulationRuntime {
       PREDATOR_PREY_GROUPS.map((g) => ({ ...g, model: services.jevModel?.() || g.model })),
       this.config.scenario,
     );
+    this.budget = services.createBudget?.();
     this.runId = services.id();
     this.replay = services.createReplay(this.runId);
     this.failures = this.zeros();
@@ -127,8 +168,10 @@ export class SimulationRuntime {
       config: { ...this.config },
       runId: this.runId,
       connections: this.connections,
-      estimatedCost:
-        this.world.scenario === 'predatorPrey'
+      budgetExposure: this.budget?.exposure,
+      estimatedCost: this.budget
+        ? this.budget.estimateCost(this.world)
+        : this.world.scenario === 'predatorPrey'
           ? // Every predator–prey call is Jev (TypeSafe), priced like the arena's Jev group.
             (Object.values(a).reduce((sum, s) => sum + s.inputTokens, 0) * 0.042) / 1e6
           : knownPrice
@@ -137,7 +180,12 @@ export class SimulationRuntime {
     };
   }
   snapshot(): Snapshot {
-    return { world: this.world, status: this.status(), decisions: this.decisions.snapshot() };
+    return {
+      world: this.world,
+      status: this.status(),
+      decisions: this.decisions.snapshot(),
+      coordination: this.coordinator?.snapshot(),
+    };
   }
   private record(event: Record<string, unknown>) {
     try {
@@ -152,6 +200,16 @@ export class SimulationRuntime {
     }
   }
   start() {
+    if (this.preparing) throw new Error('A2A services are still connecting.');
+    if (this.config.coordination && this.config.coordination !== 'off' && !this.coordinator)
+      throw new Error('Prepare coordination services before starting.');
+    if (this.coordinator?.error) throw new Error(this.coordinator.error);
+    if (this.budgetStopped)
+      throw new Error('This run reached its dollar limit. Reset before running again.');
+    if (this.config.maxCostUsd !== undefined) {
+      if (!this.budget) throw new Error('Dollar limits require the local arena server.');
+      this.budget.validate(this.world.groups);
+    }
     if (Object.values(this.readiness()).some((ready) => !ready))
       throw new Error('Configure server-side API keys for every selected model provider.');
     if (this.running) return;
@@ -186,6 +244,7 @@ export class SimulationRuntime {
     this.running = false;
     this.reason = reason;
     this.epoch++;
+    this.coordinator?.cancelAll(reason);
     for (const [id, item] of this.active) {
       item.controller.abort();
       const trace = this.decisions.get(item.animal.id).find((entry) => entry.id === id);
@@ -201,6 +260,15 @@ export class SimulationRuntime {
   }
   reset(seed: number, config: RunConfig, roster: ModelGroup[] = this.world.groups) {
     const experimentPreview = validateExperimentPreview(config.experimentPreview);
+    if (this.preparing) throw new Error('Wait for coordination setup before resetting.');
+    if (config.coordination && config.coordination !== 'off') {
+      if (!this.services.createCoordination)
+        throw new Error('Food coordination requires the local arena server.');
+      if (config.scenario === 'predatorPrey')
+        throw new Error('Food coordination requires the model arena scenario.');
+    }
+    if (config.maxCostUsd !== undefined && !this.services.createBudget)
+      throw new Error('Dollar limits require the local arena server.');
     if (this.active.size)
       throw new Error('Pending calls are still cancelling. Try resetting in a moment.');
     // Predator–prey always runs its preset: Jev rabbits vs Jev wolves with a wolf life cycle.
@@ -209,6 +277,10 @@ export class SimulationRuntime {
       ? PREDATOR_PREY_GROUPS.map((g) => ({ ...g, model: this.services.jevModel?.() || g.model }))
       : validateGroups(roster);
     this.pause();
+    this.coordinator?.dispose();
+    this.coordinator = undefined;
+    this.budget = this.services.createBudget?.();
+    this.budgetStopped = false;
     this.world = createWorld(seed, groups, config.scenario);
     this.config = { ...config, experimentPreview };
     this.runId = this.services.id();
@@ -274,6 +346,10 @@ export class SimulationRuntime {
     const elapsed = (now - this.lastTick) / 1000;
     this.lastTick = now;
     if (!this.running) return;
+    if (this.coordinator?.error) {
+      this.pause(this.coordinator.error);
+      return;
+    }
     // Avoid silently awarding free survival during laptop sleep or a blocked event loop.
     if (elapsed > 1) {
       this.pause(
@@ -288,6 +364,7 @@ export class SimulationRuntime {
       stepWorld(this.world, dt);
       remaining -= dt;
     }
+    this.coordinator?.sync();
     const alive = new Set<Rabbit | Wolf>([...this.world.rabbits, ...this.world.wolves]);
     for (const item of this.active.values()) if (!alive.has(item.animal)) item.controller.abort();
     const requested = this.requested();
@@ -321,6 +398,7 @@ export class SimulationRuntime {
     this.captureReplay();
   }
   private async dispatch(rabbit: Rabbit | Wolf) {
+    if (!this.running) return;
     const world = this.world;
     const config = { ...this.config };
     const epoch = this.epoch;
@@ -334,6 +412,14 @@ export class SimulationRuntime {
     this.active.set(id, { lineage, controller, animal: rabbit });
     const queueMs = Math.max(0, (world.time - (rabbit.nextDecision ?? 0)) * 1000);
     const observation = 'genes' in rabbit ? observe(world, rabbit) : observeWolf(world, rabbit);
+    if ('rabbit' in observation) this.coordinator?.augment(rabbit as Rabbit, observation);
+    if (this.budget && !this.budget.reserve(id, group, observation, config.maxCostUsd)) {
+      this.active.delete(id);
+      rabbit.pending = false;
+      this.budgetStopped = true;
+      this.pause('Dollar limit reached (including reservations for in-flight calls).');
+      return;
+    }
     const started = performance.now();
     stats.requested++;
     stats.queueMs.push(queueMs);
@@ -377,7 +463,9 @@ export class SimulationRuntime {
       const result = await this.services.choose(group, observation, controller.signal, {
         relief: !!rulesFor(world).reliefEnabled,
         predatorPrey: world.scenario === 'predatorPrey',
+        cooperation: !!this.coordinator,
       });
+      this.budget?.settle(id, group, result);
       stats.inputTokens += result.inputTokens;
       stats.outputTokens += result.outputTokens;
       stats.latencies.push(result.latencyMs);
@@ -385,6 +473,7 @@ export class SimulationRuntime {
       // Publish immediately on return, before artificial delay or equal-timing hold.
       publish({
         state: 'returned',
+        controllerMs: performance.now() - started,
         decision: result.decision,
         nativeResponse: result.nativeResponse,
         model: result.model,
@@ -399,6 +488,10 @@ export class SimulationRuntime {
         await this.delay(Math.max(0, config.equalizedMs - beforeEqualization), controller.signal);
       const effectiveMs = performance.now() - started;
       if (config.timing === 'realtime') late = effectiveMs > deadline;
+      const candidate =
+        'rabbit' in observation
+          ? observation.choices.find((c) => c.id === result.decision.choice)
+          : undefined;
       let outcome: DecisionTrace['state'] = 'applied';
       if (
         epoch !== this.epoch ||
@@ -411,13 +504,26 @@ export class SimulationRuntime {
         stats.late++;
         outcome = 'late';
       } else if (
+        'rabbit' in observation &&
+        candidate &&
+        !this.coordinatorValidate(rabbit as Rabbit, candidate)
+      ) {
+        stats.invalid++;
+        outcome = 'invalid';
+      } else if (
         !('wolf' in observation
           ? applyWolfDecision(world, rabbit as Wolf, result.decision, observation.choices)
           : applyDecision(world, rabbit as Rabbit, result.decision, observation.choices))
       ) {
         stats.invalid++;
         outcome = 'invalid';
-      } else stats.applied++;
+      } else {
+        stats.applied++;
+        if ('rabbit' in observation && candidate) {
+          const taskId = this.coordinator?.applied(rabbit as Rabbit, candidate, id);
+          if (taskId) publish({ coordinationTaskId: taskId });
+        }
+      }
       publish({ state: outcome, effectiveMs });
       this.failures[lineage] = 0;
       this.record({
@@ -502,6 +608,9 @@ export class SimulationRuntime {
       }
     }
   }
+  private coordinatorValidate(rabbit: Rabbit, candidate: import('./types.js').Candidate) {
+    return this.coordinator?.validate(rabbit, candidate) ?? !candidate.coordination;
+  }
   private delay(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       if (signal.aborted) {
@@ -521,6 +630,7 @@ export class SimulationRuntime {
   }
   dispose() {
     this.pause('Server stopped');
+    this.coordinator?.dispose();
     clearInterval(this.tickTimer);
   }
 }

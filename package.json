@@ -125,12 +125,14 @@
     "arena:deploy:build": "node scripts/ci-arena.mjs",
     "arena": "node dist/arena-server/server/src/evolution/cli.js",
     "arena:check": "tsx --test core/src/evolution/mechanics.test.ts server/src/evolution/modular.test.ts core/src/evolution/wolves.test.ts core/src/evolution/mapEditor.test.ts core/src/evolution/predatorPrey.test.ts",
-    "arena:ui": "node scripts/verify-arena-ui.mjs"
+    "arena:ui": "node scripts/verify-arena-ui.mjs",
+    "arena:a2a:check": "node scripts/verify-a2a-recorded.mjs"
   },
   "devDependencies": {
     "@asyncapi/modelina": "^5.10.1",
     "@asyncapi/parser": "^3.6.0",
     "@playwright/test": "^1.58.2",
+    "@types/express": "5.0.3",
     "@types/node": "26.x",
     "@types/pngjs": "^6.0.5",
     "@types/vscode": "^1.105.0",
@@ -162,9 +164,11 @@
     "webview-ui/**/*.{ts,tsx,js,css,json}": "prettier --write"
   },
   "dependencies": {
+    "@a2a-js/sdk": "1.2.1",
     "@fastify/cors": "^11.2.0",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.2.0",
+    "express": "5.1.0",
     "fastify": "^5.8.5"
   },
   "overrides": {

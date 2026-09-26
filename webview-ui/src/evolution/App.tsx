@@ -19,6 +19,7 @@ import type {
 } from '../../../core/src/evolution/types.js';
 import { groupPopulation } from '../../../core/src/evolution/world.js';
 import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
+import { CoordinationPanel } from './CoordinationPanel.js';
 import { DecisionPanel } from './DecisionPanel.js';
 import { ExperimentControls } from './ExperimentControls.js';
 import { FieldGuide } from './FieldGuide.js';
@@ -73,7 +74,9 @@ export default function App() {
       previousFocus?.focus({ preventScroll: true });
     };
   }, [showSettings]);
-  const [view, setView] = useState<'habitat' | 'analytics' | 'notes' | 'guide'>('habitat');
+  const [view, setView] = useState<'habitat' | 'analytics' | 'cooperation' | 'notes' | 'guide'>(
+    'habitat',
+  );
   const navigate = (next: typeof view) => {
     setView(next);
     window.scrollTo({ top: 0 });
@@ -434,7 +437,7 @@ export default function App() {
           <span className="brand-mark">◈</span> jevolution
         </a>
         <nav className="top-links" aria-label="Arena views">
-          {(['habitat', 'analytics', 'notes', 'guide'] as const).map((item) => (
+          {(['habitat', 'analytics', 'cooperation', 'notes', 'guide'] as const).map((item) => (
             <button
               key={item}
               className={view === item ? 'nav-active' : ''}
@@ -446,6 +449,7 @@ export default function App() {
                 {
                   habitat: 'Habitat',
                   analytics: 'Analytics',
+                  cooperation: 'Cooperation',
                   notes: 'Field notes',
                   guide: 'Field guide',
                 }[item]
@@ -738,6 +742,30 @@ export default function App() {
             </div>
           </section>
         )}
+        {view === 'cooperation' && (
+          <section className="cooperation-view">
+            {toolbar}
+            {timeline}
+            {replay.shown?.coordination ? (
+              <CoordinationPanel
+                snapshot={replay.shown}
+                onSelect={(id) => {
+                  selectAnimal(id);
+                  navigate('habitat');
+                }}
+              />
+            ) : (
+              <section className="side-panel">
+                <h2>Food-delivery cooperation</h2>
+                <p>
+                  {HOSTED
+                    ? 'Food tasks are available in the local arena. Hosted A2A support is not enabled yet.'
+                    : 'Enable local tasks or A2A tasks in run settings, then reset and start the model arena. Ordinary signals remain available in the original mode.'}
+                </p>
+              </section>
+            )}
+          </section>
+        )}
         {view === 'notes' && (
           <section className="field-notes-view" aria-label="Field notes">
             <section className="event-log">
@@ -919,6 +947,28 @@ export default function App() {
               disabled={!!liveStatus?.running || busy}
               onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
             />
+            {!HOSTED && config.scenario !== 'predatorPrey' && (
+              <label className="scenario-setting">
+                Cooperation mode
+                <select
+                  value={config.coordination || 'off'}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      coordination: e.target.value as RunConfig['coordination'],
+                    })
+                  }
+                >
+                  <option value="off">Original signals</option>
+                  <option value="local">Food tasks · local transport</option>
+                  <option value="a2a">Food tasks · A2A services</option>
+                </select>
+                <span className="small-note">
+                  Task modes share the same community goal and food rules. A2A runs two independent
+                  agent services; local mode is the transport comparison.
+                </span>
+              </label>
+            )}
             <div className="settings-grid">
               <div className="seed-setting">
                 <label htmlFor="habitat-seed">Habitat seed</label>
@@ -950,6 +1000,24 @@ export default function App() {
                   reuse a seed to repeat its starting world.
                 </p>
               </div>
+              {!HOSTED && (
+                <label>
+                  API spending limit ($, optional)
+                  <input
+                    type="number"
+                    min="0.01"
+                    max="100"
+                    step="0.01"
+                    value={config.maxCostUsd ?? ''}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        maxCostUsd: e.target.value === '' ? undefined : Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+              )}
               <label>
                 Timing mode
                 <select

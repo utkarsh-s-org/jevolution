@@ -173,8 +173,56 @@ export interface Candidate {
   followId?: number;
   recipientId?: number;
   cacheId?: number;
+  coordination?: {
+    kind: 'request' | 'accept' | 'reject' | 'continue';
+    peer: number;
+    taskId?: string;
+  };
+}
+export type CoordinationMode = 'off' | 'local' | 'a2a';
+export type FoodTaskState =
+  'sending' | 'submitted' | 'working' | 'completed' | 'rejected' | 'failed' | 'canceled';
+export interface FoodTask {
+  id: string;
+  runId: string;
+  requester: number;
+  helper: number;
+  requesterGroup: string;
+  helperGroup: string;
+  requesterService?: number;
+  helperService?: number;
+  createdAt: number;
+  expiresAt: number;
+  state: FoodTaskState;
+  decisionId: string;
+  acceptedDecisionId?: string;
+  acceptedAt?: number;
+  finishedAt?: number;
+  protocolTaskId?: string;
+  transportMs?: number;
+  reason?: string;
+  receipt?: {
+    eventId: number;
+    amount: number;
+    energyBefore: number;
+    energyAfter: number;
+    time: number;
+  };
+  history: { time: number; state: FoodTaskState; reason: string }[];
+}
+export interface CoordinationSnapshot {
+  mode: CoordinationMode;
+  tasks: FoodTask[];
+  endpoints: { label: string; url: string }[];
+  counts: Record<FoodTaskState, number>;
+  foodDelivered: number;
+  error?: string;
 }
 export interface Observation {
+  cooperation?: {
+    goal: string;
+    requests: { taskId: string; requester: number; age: number; expiresIn: number }[];
+  };
   caches: FoodCache[];
   rabbit: {
     id: number;
@@ -277,6 +325,8 @@ export interface DecisionTrace {
   latencyMs?: number;
   effectiveMs?: number;
   message?: string;
+  controllerMs?: number;
+  coordinationTaskId?: string;
 }
 export interface DecisionFeed {
   runId: string;
@@ -346,6 +396,8 @@ export interface World {
 export interface RunConfig {
   /** Unapplied experiment design metadata, not physics or model input. */
   experimentPreview?: import('./experimentPreview.js').ExperimentPreview;
+  coordination?: CoordinationMode;
+  maxCostUsd?: number;
   scenario?: Scenario;
   /** World seconds per real second (1–4). Faster cycles, same calls per real second. */
   timeScale?: number;
@@ -368,10 +420,12 @@ export interface PublicStatus {
   runId: string;
   connections: number;
   estimatedCost: number | null;
+  budgetExposure?: number;
   providerReady: Record<Provider, boolean>;
   replay: { frames: number; intervalMs: number; error?: string };
 }
 export interface Snapshot {
+  coordination?: CoordinationSnapshot;
   decisions?: Record<string, DecisionTrace[]>;
   world: World;
   status: PublicStatus;
