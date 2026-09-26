@@ -279,25 +279,32 @@ export function applyWolfDecision(
   wolf: Wolf,
   decision: Decision,
   choices: WolfCandidate[],
+  onReject?: (reason: string) => void,
 ): boolean {
+  const reject = (reason: string) => {
+    onReject?.(reason);
+    return false;
+  };
   const RULES = rulesFor(world);
   const choice = choices.find((c) => c.id === decision.choice);
-  if (!choice || decision.signal !== 'none') return false;
+  if (!choice || decision.signal !== 'none') return reject('choice-or-signal-invalid');
   let target: Point | undefined = choice.target;
   if (choice.action === 'hunt') {
     const prey = world.rabbits.find((r) => r.id === choice.preyId);
-    if (wolf.cooldown > 0 || !prey || !wolfSeesPrey(world, wolf, prey)) return false;
+    if (wolf.cooldown > 0 || !prey || !wolfSeesPrey(world, wolf, prey))
+      return reject('prey-unavailable-or-capture-cooldown');
     target = prey;
   }
   if (choice.action === 'mate') {
     const mate = wolfMate(world, wolf, choice.mateId);
-    if (!mate || world.wolves.length >= RULES.wolfPopulationCap) return false;
+    if (!mate || world.wolves.length >= RULES.wolfPopulationCap)
+      return reject('mate-unavailable-or-population-cap');
     target = mate;
   }
   if (target && (!walkable(world, target) || !visible(world, wolf, target, RULES.wolfSight)))
-    return false;
+    return reject('target-not-visible-or-walkable');
   const route = target ? findRoute(world, wolf, target) : [];
-  if (target && distance(wolf, target) > 0.8 && !route.length) return false;
+  if (target && distance(wolf, target) > 0.8 && !route.length) return reject('route-unavailable');
   wolf.action = choice.action;
   wolf.target = choice.preyId;
   wolf.mateId = choice.mateId;

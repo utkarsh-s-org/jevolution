@@ -52,6 +52,7 @@ export class ReplayStore {
   private previous?: Snapshot;
   private directory: string;
   private cached?: Chunk;
+  private dirty = false;
   constructor(
     root: string,
     readonly runId: string,
@@ -71,12 +72,13 @@ export class ReplayStore {
         );
       this.previous = next;
       this.frames++;
+      this.dirty = true;
     } catch {
       this.error = 'Replay recording failed. Previously saved frames remain available.';
     }
   }
   flush() {
-    if (!this.current || this.error) return;
+    if (!this.current || this.error || !this.dirty) return;
     mkdirSync(this.directory, { recursive: true });
     const file = path.join(this.directory, `${this.current.start}.json.gz`);
     writeFileSync(`${file}.tmp`, gzipSync(JSON.stringify(this.current), { level: 1 }));
@@ -87,6 +89,7 @@ export class ReplayStore {
       JSON.stringify({ runId: this.runId, frames: this.frames, intervalMs: RULES.tickMs }),
     );
     renameSync(`${manifest}.tmp`, manifest);
+    this.dirty = false;
   }
   get(index: number): Snapshot {
     if (!Number.isInteger(index) || index < 0 || index >= this.frames)

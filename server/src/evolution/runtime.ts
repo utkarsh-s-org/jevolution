@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 
 import {
@@ -10,6 +11,7 @@ import {
   validateGroups,
 } from '../../../core/src/evolution/constants.js';
 import { editWorldMap, validateMapEdits } from '../../../core/src/evolution/mapEditor.js';
+import { costBreakdown, experimentReport } from '../../../core/src/evolution/reporting.js';
 import { applyDecision, observe, stepWorld } from '../../../core/src/evolution/simulation.js';
 import type {
   DecisionTrace,
@@ -27,9 +29,12 @@ import { DecisionJournal } from './decisions.js';
 import {
   choose,
   defaultGroups,
-  MODEL_DEFAULTS,
+  INSTRUCTIONS,
+  PREDATOR_PREY_WOLF_INSTRUCTIONS,
+  PREY_INSTRUCTIONS,
   ProviderError,
   providerReadiness,
+  WOLF_INSTRUCTIONS,
 } from './models.js';
 import { ReplayStore } from './replay.js';
 
@@ -56,6 +61,23 @@ export class ArenaRuntime {
   private lastTick = performance.now();
   private directory: string;
   private savedInitial = false;
+  readonly metrics = {
+    replayCaptures: 0,
+    replayMs: 0,
+    logRecords: 0,
+    logMs: 0,
+    ticks: 0,
+    tickMs: 0,
+    maxTickMs: 0,
+  };
+  private runProvenance: unknown;
+  report() {
+    return {
+      ...experimentReport(this.snapshot()),
+      performance: { ...this.metrics, memory: process.memoryUsage() },
+      provenance: this.runProvenance ?? null,
+    };
+  }
   replay: ReplayStore;
   constructor(logRoot: string) {
     this.directory = logRoot;
@@ -83,7 +105,10 @@ export class ArenaRuntime {
     return Object.values(this.world.stats).reduce((sum, s) => sum + s.requested, 0);
   }
   private captureReplay() {
+    const started = performance.now();
     this.replay.capture(this.snapshot());
+    this.metrics.replayCaptures++;
+    this.metrics.replayMs += performance.now() - started;
   }
   readiness() {
     const ready = providerReadiness();
@@ -103,16 +128,6 @@ export class ArenaRuntime {
     const backlog = this.zeros();
     for (const r of this.actors())
       if (!r.pending && (r.nextDecision ?? 0) <= this.world.time) backlog[r.lineage!]++;
-    const a = this.world.stats;
-    const knownPrice =
-      this.world.groups.filter((g) => g.controller !== 'deterministic').length === 2 &&
-      this.world.groups
-        .filter((g) => g.controller !== 'deterministic')
-        .every(
-          (g) =>
-            (g.id === 'jev' && g.provider === 'typesafe' && g.model === MODEL_DEFAULTS.jev) ||
-            (g.id === 'claude' && g.provider === 'anthropic' && g.model === MODEL_DEFAULTS.claude),
-        );
     return {
       running: this.running,
       providerReady: providerReadiness(),
@@ -125,19 +140,14 @@ export class ArenaRuntime {
       config: { ...this.config },
       runId: this.runId,
       connections: this.connections,
-      estimatedCost:
-        this.world.scenario === 'predatorPrey'
-          ? // Every predator–prey call is Jev (TypeSafe), priced like the arena's Jev group.
-            (Object.values(a).reduce((sum, s) => sum + s.inputTokens, 0) * 0.042) / 1e6
-          : knownPrice
-            ? (a.jev.inputTokens * 0.042 + a.claude.inputTokens + a.claude.outputTokens * 5) / 1e6
-            : null,
+      estimatedCost: costBreakdown(this.world).usd,
     };
   }
   snapshot(): Snapshot {
     return { world: this.world, status: this.status(), decisions: this.decisions.snapshot() };
   }
   private record(event: Record<string, unknown>) {
+    const started = performance.now();
     try {
       mkdirSync(this.directory, { recursive: true });
       appendFileSync(
@@ -151,6 +161,9 @@ export class ArenaRuntime {
       );
     } catch {
       this.pause('Recording failed. Run stopped to avoid losing decision provenance.');
+    } finally {
+      this.metrics.logRecords++;
+      this.metrics.logMs += performance.now() - started;
     }
   }
   start() {
@@ -178,6 +191,34 @@ export class ArenaRuntime {
             'https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools',
           ],
         }),
+      );
+      let build: unknown = null;
+      try {
+        build = JSON.parse(
+          readFileSync(path.join(process.cwd(), 'dist/arena-provenance.json'), 'utf8'),
+        );
+      } catch {
+        /* unknown is explicit */
+      }
+      const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+      this.runProvenance = {
+        prompts: {
+          PREY_INSTRUCTIONS,
+          INSTRUCTIONS,
+          WOLF_INSTRUCTIONS,
+          PREDATOR_PREY_WOLF_INSTRUCTIONS,
+        },
+        build,
+        configSha256: hash(this.config),
+        rules: rulesFor(this.world),
+        rulesSha256: hash(rulesFor(this.world)),
+        initialWorldSha256: hash(this.world),
+        node: process.version,
+        recordedAt: new Date().toISOString(),
+      };
+      writeFileSync(
+        path.join(this.directory, `${this.runId}.provenance.json`),
+        JSON.stringify(this.runProvenance, null, 2),
       );
       this.savedInitial = true;
     }
@@ -220,6 +261,9 @@ export class ArenaRuntime {
     this.decisions.clear();
     this.replay = new ReplayStore(this.directory, this.runId);
     this.savedInitial = false;
+    this.runProvenance = undefined;
+    for (const key of Object.keys(this.metrics) as (keyof typeof this.metrics)[])
+      this.metrics[key] = 0;
     this.backoff = this.zeros();
     this.reason = 'New habitat ready. Configure keys for the selected providers, then start.';
     this.captureReplay();
@@ -275,6 +319,18 @@ export class ArenaRuntime {
     this.captureReplay();
   }
   private tick() {
+    if (!this.running) return this.advance();
+    const started = performance.now();
+    try {
+      this.advance();
+    } finally {
+      const elapsed = performance.now() - started;
+      this.metrics.ticks++;
+      this.metrics.tickMs += elapsed;
+      this.metrics.maxTickMs = Math.max(this.metrics.maxTickMs, elapsed);
+    }
+  }
+  private advance() {
     const now = performance.now();
     const elapsed = (now - this.lastTick) / 1000;
     this.lastTick = now;
@@ -302,7 +358,13 @@ export class ArenaRuntime {
       this.ecologyFinished()
     ) {
       this.record({ type: 'finished', snapshot: this.snapshot() });
-      this.pause('Run complete · export your observations or reset.');
+      this.pause(
+        this.world.time >= this.config.maxSeconds
+          ? 'Run complete · simulation horizon reached.'
+          : requested >= this.config.maxRequests
+            ? 'Request cap reached before simulation horizon · export this partial run.'
+            : 'Run stopped · no active population remains.',
+      );
       return;
     }
     const status = this.status();
@@ -405,6 +467,10 @@ export class ArenaRuntime {
       const effectiveMs = performance.now() - started;
       if (config.timing === 'realtime') late = effectiveMs > deadline;
       let outcome: DecisionTrace['state'] = 'applied';
+      let rejectionReason: string | undefined;
+      const reject = (reason: string) => {
+        rejectionReason = reason;
+      };
       if (
         epoch !== this.epoch ||
         !this.running ||
@@ -417,13 +483,13 @@ export class ArenaRuntime {
         outcome = 'late';
       } else if (
         !('wolf' in observation
-          ? applyWolfDecision(world, rabbit as Wolf, result.decision, observation.choices)
-          : applyDecision(world, rabbit as Rabbit, result.decision, observation.choices))
+          ? applyWolfDecision(world, rabbit as Wolf, result.decision, observation.choices, reject)
+          : applyDecision(world, rabbit as Rabbit, result.decision, observation.choices, reject))
       ) {
         stats.invalid++;
         outcome = 'invalid';
       } else stats.applied++;
-      publish({ state: outcome, effectiveMs });
+      publish({ state: outcome, effectiveMs, message: rejectionReason });
       this.failures[lineage] = 0;
       this.record({
         type: 'decision',
@@ -436,6 +502,7 @@ export class ArenaRuntime {
         queueMs,
         effectiveMs,
         outcome,
+        rejectionReason,
       });
     } catch (error) {
       if (

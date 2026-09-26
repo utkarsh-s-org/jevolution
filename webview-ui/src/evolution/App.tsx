@@ -19,7 +19,12 @@ import { groupPopulation } from '../../../core/src/evolution/world.js';
 import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
 import { DecisionPanel } from './DecisionPanel.js';
 import { FieldGuide } from './FieldGuide.js';
-import { InheritedTraits, LatencyPanel, PopulationOutcomes } from './GroupPanels.js';
+import {
+  ExperimentPanel,
+  InheritedTraits,
+  LatencyPanel,
+  PopulationOutcomes,
+} from './GroupPanels.js';
 import { MapEditor } from './MapEditor.js';
 import { ModelSettings } from './ModelSettings.js';
 import { OrganismInspector } from './OrganismInspector.js';
@@ -176,7 +181,8 @@ export default function App() {
     return world && group ? groupPopulation(world, group) : 0;
   };
   const total = world?.rabbits.length || 0;
-  const missingKeys = liveStatus && Object.values(liveStatus.ready).some((ready) => !ready);
+  const missingKeys =
+    liveStatus && !liveStatus.readOnly && Object.values(liveStatus.ready).some((ready) => !ready);
   const generation = Math.max(0, ...(world?.rabbits.map((r) => r.generation) || []));
   const droughtSeconds = world ? Math.max(0, Math.ceil(world.droughtUntil - world.time)) : 0;
   const populationSummary = (
@@ -252,7 +258,13 @@ export default function App() {
       <div className="habitat-tools">
         <div className="habitat-state">
           <span className={`connection-dot ${status?.running ? 'connected' : ''}`} />
-          {replay.reviewing ? 'REPLAY' : liveStatus?.running ? 'LIVE' : 'PAUSED'}
+          {liveStatus?.readOnly
+            ? 'RECORDED RUN'
+            : replay.reviewing
+              ? 'REPLAY'
+              : liveStatus?.running
+                ? 'LIVE'
+                : 'PAUSED'}
         </div>
         <div className={`map-weather${droughtSeconds > 0 ? ' active' : ''}`}>
           <button
@@ -284,7 +296,13 @@ export default function App() {
         <div className="playback-actions">
           <button
             className="primary-button"
-            disabled={editor.open || busy || !connected || (!liveStatus?.running && !!missingKeys)}
+            disabled={
+              !!liveStatus?.readOnly ||
+              editor.open ||
+              busy ||
+              !connected ||
+              (!liveStatus?.running && !!missingKeys)
+            }
             onClick={() => void control(liveStatus?.running ? 'pause' : 'start')}
           >
             {liveStatus?.running
@@ -297,7 +315,7 @@ export default function App() {
             className="icon-button"
             title="Run settings and reset"
             aria-label="Open run settings"
-            disabled={editor.open}
+            disabled={editor.open || !!liveStatus?.readOnly}
             onClick={() => {
               setConfig(liveStatus?.config || DEFAULT_CONFIG);
               setSeed(snapshot?.world.seed || 271828);
@@ -319,7 +337,12 @@ export default function App() {
                   : 'Edit map'
             }
             disabled={
-              busy || !connected || !!liveStatus?.running || replay.reviewing || editor.open
+              !!liveStatus?.readOnly ||
+              busy ||
+              !connected ||
+              !!liveStatus?.running ||
+              replay.reviewing ||
+              editor.open
             }
             onClick={() => {
               selectAnimal(null);
@@ -340,8 +363,13 @@ export default function App() {
           </button>
         </div>
         <a className="export-link" href="/api/arena/export" download>
-          Export run ↓
+          Export snapshot ↓
         </a>
+        {!liveStatus?.running && (
+          <a className="export-link" href="/api/arena/bundle" download>
+            Full experiment bundle ↓
+          </a>
+        )}
       </div>
       {editor.open && (
         <div className="editor-top-hint">Paused · paint to preview · apply when ready</div>
@@ -631,6 +659,7 @@ export default function App() {
             />
             <div className="analytics-grid">
               <div className="analytics-column">
+                <ExperimentPanel snapshot={replay.shown} />
                 <PopulationOutcomes snapshot={replay.shown} />
                 <LatencyPanel snapshot={replay.shown} />
               </div>
