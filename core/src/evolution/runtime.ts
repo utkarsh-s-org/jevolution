@@ -1,5 +1,6 @@
 import {
   DEFAULT_CONFIG,
+  DEFAULT_SEED,
   PREDATOR_PREY_GROUPS,
   RULES,
   rulesFor,
@@ -49,7 +50,7 @@ export class SimulationRuntime {
   private services: RuntimeServices;
   constructor(services: RuntimeServices) {
     this.services = services;
-    this.world = createWorld(271828, services.defaultGroups());
+    this.world = createWorld(DEFAULT_SEED, services.defaultGroups());
     this.runId = services.id();
     this.replay = services.createReplay(this.runId);
     this.failures = this.zeros();
