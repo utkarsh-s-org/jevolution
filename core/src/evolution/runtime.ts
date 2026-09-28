@@ -7,7 +7,9 @@ import {
   validateGroups,
 } from './constants.js';
 import { DecisionJournal } from './decisions.js';
+import { configureExperiments, dependent } from './demographics.js';
 import { validateExperimentPreview } from './experimentPreview.js';
+import { validateExperiments } from './experiments.js';
 import { editWorldMap, validateMapEdits } from './mapEditor.js';
 import { ProviderError } from './providerError.js';
 import { costBreakdown, experimentReport } from './reporting.js';
@@ -77,9 +79,11 @@ export class SimulationRuntime {
   }
   private actors() {
     return [
-      ...this.world.rabbits,
+      ...this.world.rabbits.filter((r) => !dependent(this.world, r)),
       ...this.world.wolves.filter(
-        (w) => this.world.groups.find((g) => g.id === w.lineage)?.controller === 'model',
+        (w) =>
+          !dependent(this.world, w) &&
+          this.world.groups.find((g) => g.id === w.lineage)?.controller === 'model',
       ),
     ];
   }
@@ -197,6 +201,7 @@ export class SimulationRuntime {
   }
   reset(seed: number, config: RunConfig, roster: ModelGroup[] = this.world.groups) {
     const experimentPreview = validateExperimentPreview(config.experimentPreview);
+    const experiments = validateExperiments(config.experiments);
     if (this.active.size)
       throw new Error('Pending calls are still cancelling. Try resetting in a moment.');
     // Predator–prey always runs its preset: Jev rabbits vs Jev wolves with a wolf life cycle.
@@ -206,7 +211,8 @@ export class SimulationRuntime {
       : validateGroups(roster);
     this.pause();
     this.world = createWorld(seed, groups, config.scenario);
-    this.config = { ...config, experimentPreview };
+    configureExperiments(this.world, experiments);
+    this.config = { ...config, experimentPreview, experiments };
     this.runId = this.services.id();
     this.decisions.clear();
     this.replay = this.services.createReplay(this.runId);
@@ -393,6 +399,7 @@ export class SimulationRuntime {
       const result = await this.services.choose(group, observation, controller.signal, {
         relief: !!rulesFor(world).reliefEnabled,
         predatorPrey: world.scenario === 'predatorPrey',
+        experiments: world.experiments,
       });
       stats.inputTokens += result.inputTokens;
       stats.outputTokens += result.outputTokens;

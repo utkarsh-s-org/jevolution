@@ -1,4 +1,5 @@
 import { rulesFor } from './constants.js';
+import { compatible, conceive } from './demographics.js';
 import type {
   Decision,
   Point,
@@ -37,7 +38,7 @@ export function finishWolfLife(world: World, wolf: Wolf, moved: number, caught: 
   if (!dynamicWolf(world, wolf)) return;
   wolf.energy = (wolf.energy ?? RULES.wolfFounderEnergy) - moved * RULES.wolfMovementCost;
   if (caught) wolf.energy = Math.min(100, wolf.energy + RULES.wolfMealEnergy);
-  if (wolf.energy <= 0 || wolf.age! > RULES.wolfLifespan) {
+  if (wolf.energy <= 0 || wolf.age! > (wolf.life?.deathAge ?? RULES.wolfLifespan)) {
     const cause = wolf.energy <= 0 ? 'starvation' : 'oldAge';
     world.wolves = world.wolves.filter((w) => w.id !== wolf.id);
     wolf.pending = false;
@@ -56,6 +57,7 @@ export function finishWolfLife(world: World, wolf: Wolf, moved: number, caught: 
 export function wolfReadyToMate(world: World, wolf: Wolf): boolean {
   const RULES = rulesFor(world);
   return (
+    !wolf.life?.pregnancy &&
     dynamicWolf(world, wolf) &&
     (wolf.age ?? 0) >= RULES.wolfMaturity &&
     (wolf.age ?? 0) <= RULES.wolfLifespan &&
@@ -70,6 +72,7 @@ export function wolfMate(world: World, wolf: Wolf, id?: number): Wolf | undefine
     (other) =>
       other.id === id &&
       other.id !== wolf.id &&
+      compatible(world, wolf, other) &&
       other.lineage === wolf.lineage &&
       wolfReadyToMate(world, other) &&
       tileAt(world, other)?.kind !== 'shelter' &&
@@ -112,6 +115,7 @@ export function reproduceWolves(world: World) {
             .filter(
               (other) =>
                 other.id !== wolf.id &&
+                compatible(world, wolf, other) &&
                 other.lineage === wolf.lineage &&
                 distance(wolf, other) <= RULES.wolfPairDistance &&
                 wolfReadyToMate(world, wolf) &&
@@ -127,6 +131,10 @@ export function reproduceWolves(world: World) {
           distance(wolf, mate) >= RULES.mateDistance))
     )
       continue;
+    if (world.experiments?.demographics) {
+      conceive(world, wolf, mate);
+      continue;
+    }
     const position = [
       [1, 0],
       [-1, 0],
@@ -206,9 +214,14 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
       action: 'mate',
       mateId: mate.id,
       target: center(mate),
-      description: `Reproduce with wolf ${mate.id}. Both must choose each other and meet within ${RULES.mateDistance} tiles. Each parent pays ${RULES.wolfBreedCost} energy and waits ${RULES.wolfBreedCooldown}s before another birth.${mate.mateId === wolf.id ? ' This wolf has chosen you.' : ''}`,
+      description: world.experiments?.demographics
+        ? `Approach compatible wolf ${mate.id}. Automatic conception within ${RULES.wolfPairDistance} tiles when both are eligible. Pups arrive after 24 simulation seconds; both parents reserve newborn energy now.`
+        : `Reproduce with wolf ${mate.id}. Both must choose each other and meet within ${RULES.mateDistance} tiles. Each parent pays ${RULES.wolfBreedCost} energy and waits ${RULES.wolfBreedCooldown}s before another birth.${mate.mateId === wolf.id ? ' This wolf has chosen you.' : ''}`,
     });
-  if (wolf.cooldown <= 0) {
+  if (
+    wolf.cooldown <= 0 &&
+    (!world.experiments?.demographics || (wolf.age ?? 0) >= RULES.wolfMaturity)
+  ) {
     for (const r of prey.slice(0, 6)) {
       if (distance(wolf, r) > 0.8 && !findRoute(world, wolf, r).length) continue;
       choices.push({

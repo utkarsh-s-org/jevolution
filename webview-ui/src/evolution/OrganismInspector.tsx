@@ -1,4 +1,4 @@
-import { GENE_NAMES, RULES, TRAIT_INFO } from '../../../core/src/evolution/constants.js';
+import { GENE_NAMES, rulesFor, TRAIT_INFO } from '../../../core/src/evolution/constants.js';
 import type { Snapshot } from '../../../core/src/evolution/types.js';
 
 export function OrganismInspector({
@@ -13,6 +13,7 @@ export function OrganismInspector({
   onSelect: (id: number | null) => void;
 }) {
   const world = snapshot?.world;
+  const RULES = rulesFor(world);
   const groups = world?.groups || [];
   const groupName = (id: string) => groups.find((g) => g.id === id)?.label || id;
   const rabbit = world?.rabbits.find((r) => r.id === selected);
@@ -175,9 +176,11 @@ export function OrganismInspector({
               </div>
               {!compact && (
                 <p className="small-note">
-                  Births need two same-group wolves to choose each other and meet nearby. Both need{' '}
-                  {RULES.wolfBreedEnergy} energy and age {RULES.wolfMaturity}s; each pays{' '}
-                  {RULES.wolfBreedCost} energy. Hunger and old age cause death.
+                  {world?.experiments?.demographics
+                    ? `Paired conception, 24s gestation and 12s dependent pups. Maturity: 45s. Sex: ${wolf.life?.sex ?? 'unknown'}. ${wolf.life?.pregnancy ? `Pregnant until ${wolf.life.pregnancy.due.toFixed(1)}s.` : ''}`
+                    : RULES.wolfSoloPups
+                      ? 'Baseline population model: a fed mature wolf has pups alone. This is not individual reproductive biology.'
+                      : `Two eligible same-group wolves choose each other and meet. Maturity ${RULES.wolfMaturity}s; energy threshold ${RULES.wolfBreedEnergy}.`}
                 </p>
               )}
             </>

@@ -1,5 +1,13 @@
 import { GENE_NAMES, GRID, RULES as BASE_RULES, type Rules, rulesFor } from './constants.js';
 import {
+  boundaryMigration,
+  careAndDisperse,
+  compatible,
+  conceive,
+  dependent,
+  finishGestations,
+} from './demographics.js';
+import {
   finishDrought,
   recordRelief,
   reliefChoices,
@@ -46,6 +54,7 @@ import {
 
 export const vision = (r: Rabbit) => 4 + Math.floor(r.genes.vigilance * 6);
 export const mature = (r: Rabbit, RULES: Rules = BASE_RULES) =>
+  !r.life?.pregnancy &&
   r.age >= RULES.maturity &&
   r.cooldown <= 0 &&
   r.energy >= RULES.breedEnergy &&
@@ -178,14 +187,16 @@ export function observe(world: World, r: Rabbit): Observation {
   // Listed first after rest: offspring are how a lineage grows.
   if (mature(r, RULES)) {
     const mates = neighbors
-      .filter((a) => a.lineage === r.lineage && mature(a, RULES))
+      .filter((a) => a.lineage === r.lineage && mature(a, RULES) && compatible(world, r, a))
       .sort((a, b) => distance(r, a) - distance(r, b))
       .slice(0, 2);
     for (const m of mates)
       add(
         'mate',
         m,
-        `Reproduce with rabbit ${m.id}: produces offspring that grow your lineage. Both of you are healthy and mature; rabbit ${m.id} must also choose to mate.`,
+        world.experiments?.demographics
+          ? `Approach compatible rabbit ${m.id}. Conception occurs when eligible adults meet within ${RULES.preyMateDistance} tiles; offspring arrive after gestation, costing parent energy.`
+          : `Reproduce with rabbit ${m.id}: produces offspring that grow your lineage. Both of you are healthy and mature; rabbit ${m.id} must also choose to mate.`,
         m.id,
       );
   }
@@ -330,7 +341,11 @@ export function applyDecision(
     chosen.action === 'mate' &&
     (!mature(r, RULES) ||
       !world.rabbits.some(
-        (a) => a.id === chosen.mateId && a.lineage === r.lineage && mature(a, RULES),
+        (a) =>
+          a.id === chosen.mateId &&
+          a.lineage === r.lineage &&
+          mature(a, RULES) &&
+          compatible(world, r, a),
       ))
   )
     return reject('mate-no-longer-eligible');
@@ -438,6 +453,7 @@ function kill(
   );
 }
 function reproduce(world: World, a: Rabbit, b: Rabbit) {
+  if (!compatible(world, a, b)) return;
   const RULES = rulesFor(world);
   if (world.rabbits.length >= RULES.maxPopulation) return;
   // Crowding makes each birth attempt less likely to succeed (logistic growth), so rabbits level
@@ -452,6 +468,10 @@ function reproduce(world: World, a: Rabbit, b: Rabbit) {
   if (crowded && random(world) < crowded) {
     for (const r of new Set([a, b]))
       r.cooldown = RULES.breedCooldown * (1.3 - 0.6 * r.genes.fertility);
+    return;
+  }
+  if (world.experiments?.demographics) {
+    conceive(world, a, b);
     return;
   }
   const free = [
@@ -521,6 +541,7 @@ export function stepWorld(world: World, dt: number) {
   for (const r of ordered) {
     r.age += dt;
     r.cooldown -= dt;
+    careAndDisperse(world, r, dt);
     const basal =
       RULES.baseMetabolism +
       r.genes.vigilance * RULES.visionMetabolism +
@@ -560,7 +581,8 @@ export function stepWorld(world: World, dt: number) {
       r.target = undefined;
       if (!r.pending) r.nextDecision = Math.min(r.nextDecision, world.time);
     }
-    const moved = move(r, speed, dt);
+    const juvenile = world.experiments?.demographics && r.age < RULES.maturity;
+    const moved = move(r, dependent(world, r) ? 0 : speed * (juvenile ? 0.65 : 1), dt);
     r.energy -= moved * (RULES.movementCost + r.genes.speed * 0.14);
     if (!r.path.length) {
       const t = tileAt(world, r)!;
@@ -595,6 +617,7 @@ export function stepWorld(world: World, dt: number) {
               (b) =>
                 b.id !== r.id &&
                 b.lineage === r.lineage &&
+                compatible(world, r, b) &&
                 (passive || (b.id === r.mateId && b.action === 'mate' && b.mateId === r.id)) &&
                 mature(b, RULES) &&
                 distance(r, b) < (passive ? RULES.preyMateDistance : RULES.mateDistance),
@@ -605,10 +628,11 @@ export function stepWorld(world: World, dt: number) {
     }
     if (r.energy <= 0) kill(world, r, 'starvation');
     else if (r.water <= 0) kill(world, r, 'dehydration');
-    else if (r.age > RULES.lifespan) kill(world, r, 'oldAge');
+    else if (r.age > (r.life?.deathAge ?? RULES.lifespan)) kill(world, r, 'oldAge');
   }
   for (const w of [...world.wolves]) {
     ageWolf(world, w, dt);
+    careAndDisperse(world, w, dt);
     let caught = false;
     w.cooldown = Math.max(0, w.cooldown - dt);
     if (world.time >= w.nextHunt) {
@@ -670,7 +694,10 @@ export function stepWorld(world: World, dt: number) {
     }
     const moved = move(
       w,
-      RULES.wolfSpeed *
+      (dependent(world, w)
+        ? 0
+        : RULES.wolfSpeed *
+          (world.experiments?.demographics && (w.age ?? 0) < RULES.wolfMaturity ? 0.65 : 1)) *
         (w.cooldown > 0 ? 0.35 : 1) *
         (tileAt(world, w)?.kind === 'forest' ? RULES.forestSpeed : 1),
       dt,
@@ -692,7 +719,12 @@ export function stepWorld(world: World, dt: number) {
         ? world.wolves.filter((o) => o !== w && distance(o, w) <= 4).length
         : 0;
     const interfered = rivals > 0 && random(world) >= 1 / (1 + RULES.wolfInterference * rivals);
-    if (prey && w.cooldown <= 0 && !interfered) {
+    if (
+      prey &&
+      w.cooldown <= 0 &&
+      !interfered &&
+      (!world.experiments?.demographics || (w.age ?? 0) >= RULES.wolfMaturity)
+    ) {
       kill(world, prey, 'predation');
       caught = true;
       if (w.lineage && world.stats[w.lineage]) world.stats[w.lineage].kills++;
@@ -704,7 +736,9 @@ export function stepWorld(world: World, dt: number) {
     finishWolfLife(world, w, moved, caught);
   }
   reproduceWolves(world);
-  migrate(world);
+  finishGestations(world);
+  if (world.experiments?.demographics) boundaryMigration(world);
+  else migrate(world);
   finishDrought(world);
   if (world.time - world.lastSample >= RULES.historySeconds) {
     world.lastSample = world.time;

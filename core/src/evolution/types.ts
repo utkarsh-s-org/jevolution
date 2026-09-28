@@ -66,7 +66,14 @@ export interface Memory {
   food?: number;
   wolfId?: number;
 }
+export interface LifeHistory {
+  sex: 'female' | 'male';
+  deathAge: number;
+  dispersed: boolean;
+  pregnancy?: { due: number; father: number; generation: number; fatherGenes?: Genes };
+}
 export interface Rabbit extends Point {
+  life?: LifeHistory;
   id: number;
   lineage: Lineage;
   genes: Genes;
@@ -100,6 +107,7 @@ export interface Rabbit extends Point {
 }
 export type WolfAction = 'rest' | 'hunt' | 'explore' | 'mate';
 export interface Wolf extends Point {
+  life?: LifeHistory;
   energy?: number;
   age?: number;
   generation?: number;
@@ -319,6 +327,8 @@ export interface WorldEvent {
   lineage?: Lineage;
 }
 export interface World {
+  experiments?: import('./experiments.js').Experiments;
+  mechanisms?: Record<string, number>;
   scenario?: Scenario;
   mapRevision?: number;
   groups: ModelGroup[];
@@ -344,6 +354,7 @@ export interface World {
   migrants?: { wolves: number; rabbits: number; lastAt: number };
 }
 export interface RunConfig {
+  experiments?: import('./experiments.js').Experiments;
   /** Unapplied experiment design metadata, not physics or model input. */
   experimentPreview?: import('./experimentPreview.js').ExperimentPreview;
   scenario?: Scenario;

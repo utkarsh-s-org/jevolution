@@ -30,6 +30,7 @@ import {
 } from './GroupPanels.js';
 import { arenaRequest, HOSTED, hostedClient } from './hostedClient.js';
 import { MapEditor } from './MapEditor.js';
+import { MechanismControls } from './MechanismControls.js';
 import { ModelSettings } from './ModelSettings.js';
 import { OrganismInspector } from './OrganismInspector.js';
 import { PopulationChart } from './PopulationChart.js';
@@ -910,6 +911,7 @@ export default function App() {
                   setConfig({
                     ...SCENARIO_CONFIG[next],
                     experimentPreview: config.experimentPreview,
+                    experiments: config.experiments,
                   });
                   setGroupsDraft(
                     next === 'predatorPrey'
@@ -926,10 +928,10 @@ export default function App() {
             </label>
             {config.scenario === 'predatorPrey' ? (
               <p className="small-note">
-                Preset: 70 Jev rabbits and 8 Jev wolves. Rabbits breed on their own; wolves have
-                pups from kills and starve without them, so both populations rise and fall in
-                cycles. Like a real open habitat, a wolf and two rabbits join every 20 seconds
-                beside their own kind. Uses your TypeSafe key only.
+                Preset: 70 Jev rabbits and 8 Jev wolves. Uses your TypeSafe key only. The original
+                population-rate model includes solo births and continuous immigration. Active
+                mechanism experiments below override those assumptions. Population cycles are
+                outcomes, not guaranteed targets.
               </p>
             ) : (
               <ModelSettings
@@ -938,6 +940,11 @@ export default function App() {
                 ready={liveStatus?.providerReady}
               />
             )}
+            <MechanismControls
+              value={config.experiments}
+              disabled={busy}
+              onChange={(experiments) => setConfig({ ...config, experiments })}
+            />
             <ExperimentControls
               value={config.experimentPreview}
               disabled={!!liveStatus?.running || busy}

@@ -14,6 +14,7 @@ import {
   validateGroups,
 } from '../../../core/src/evolution/constants.js';
 import { validateExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
+import { validateExperiments } from '../../../core/src/evolution/experiments.js';
 import type { RunConfig } from '../../../core/src/evolution/types.js';
 import { exportBundle } from './evidence.js';
 import { ArenaRuntime } from './runtime.js';
@@ -54,6 +55,7 @@ function configFrom(input: Record<string, unknown>): RunConfig {
     throw new Error('Invalid scenario.');
   if (input.scenario) next.scenario = input.scenario as RunConfig['scenario'];
   next.experimentPreview = validateExperimentPreview(input.experimentPreview);
+  next.experiments = validateExperiments(input.experiments);
   return next;
 }
 async function main() {
