@@ -1,16 +1,21 @@
 import { useMemo } from 'react';
 
 import { GENE_NAMES, TRAIT_INFO } from '../../../core/src/evolution/constants.js';
-import { costBreakdown, populationAccounting } from '../../../core/src/evolution/reporting.js';
+import {
+  costBreakdown,
+  distribution,
+  mechanismSummary,
+  populationAccounting,
+} from '../../../core/src/evolution/reporting.js';
 import { meanGenes } from '../../../core/src/evolution/simulation.js';
 import type { Snapshot } from '../../../core/src/evolution/types.js';
 import { createWorld, groupPopulation } from '../../../core/src/evolution/world.js';
 import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
 
 function percentile(values: number[], p: number) {
-  if (!values.length) return 'N/A';
-  const sorted = [...values].sort((a, b) => a - b);
-  return `${Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))])} ms`;
+  const stats = distribution(values);
+  const value = p === 0.5 ? stats.median : stats.p95;
+  return value === null ? 'N/A' : `${Math.round(value)} ms`;
 }
 export function PopulationOutcomes({ snapshot }: { snapshot: Snapshot | null }) {
   if (!snapshot) return null;
@@ -172,11 +177,16 @@ export function LatencyPanel({ snapshot }: { snapshot: Snapshot | null }) {
   if (!snapshot) return null;
   const { world, status } = snapshot;
   const groups = world.groups;
+  const research = !!status.config.experiments?.researchClock;
   return (
     <section className="side-panel latency-panel">
       <h2>Every millisecond counts.</h2>
       <p className="small-note">
-        {status.config.timing === 'equalized' ? 'Equal timing control' : 'Actual API round trips'}
+        {research
+          ? 'Research clock · biology waits for the complete round'
+          : status.config.timing === 'equalized'
+            ? 'Equal timing control'
+            : 'Actual API round trips'}
       </p>
       <div className="group-results">
         {groups.map((g) => {
@@ -210,9 +220,10 @@ export function LatencyPanel({ snapshot }: { snapshot: Snapshot | null }) {
                     </b>
                   </div>
                   <div className="compact-row">
-                    <span>Queue median / p95 (world ms)</span>
+                    <span>Queue median / p95 ({research ? 'wall' : 'world'} ms)</span>
                     <b>
-                      {percentile(s.queueMs, 0.5)} / {percentile(s.queueMs, 0.95)}
+                      {percentile(research ? (s.queueWallMs ?? []) : s.queueMs, 0.5)} /{' '}
+                      {percentile(research ? (s.queueWallMs ?? []) : s.queueMs, 0.95)}
                     </b>
                   </div>
                   <div className="compact-row">
@@ -228,9 +239,10 @@ export function LatencyPanel({ snapshot }: { snapshot: Snapshot | null }) {
                     </b>
                   </div>
                   <div className="compact-row">
-                    <span>Late / errors / queued</span>
+                    <span>Late / errors / {research ? 'queued' : 'request-ready'}</span>
                     <b>
-                      {s.late} / {s.errors} / {status.backlog[g.id] || 0}
+                      {s.late} / {s.errors} /{' '}
+                      {research && !status.running ? 0 : status.backlog[g.id] || 0}
                     </b>
                   </div>
                 </>
@@ -240,11 +252,13 @@ export function LatencyPanel({ snapshot }: { snapshot: Snapshot | null }) {
         })}
       </div>
       <div className="deadline-note">
-        Decision window{' '}
+        {research ? 'Provider timeout' : 'Decision window'}{' '}
         <strong>
-          {status.config.timing === 'equalized'
-            ? status.config.equalizedMs
-            : status.config.deadlineMs}{' '}
+          {research
+            ? 15000
+            : status.config.timing === 'equalized'
+              ? status.config.equalizedMs
+              : status.config.deadlineMs}{' '}
           ms
         </strong>
       </div>
@@ -258,9 +272,20 @@ export function ExperimentPanel({ snapshot }: { snapshot: Snapshot | null }) {
   const requests = Object.values(world.stats).reduce((sum, s) => sum + s.requested, 0);
   const capped = requests >= status.config.maxRequests && world.time < status.config.maxSeconds;
   const cost = costBreakdown(world);
+  const mechanism = mechanismSummary(world);
   return (
     <section className="side-panel">
       <h2>Experiment accounting</h2>
+      <div className="compact-row">
+        <span>Clock</span>
+        <b>{mechanism.settings.researchClock ? 'Fixed 50ms steps · 2s rounds' : 'Real time'}</b>
+      </div>
+      {status.clock?.mode === 'research' && (
+        <p className="small-note">
+          Round {status.clock.round} · {status.running ? status.clock.phase : 'paused'} ·{' '}
+          {status.clock.queued} waiting to send
+        </p>
+      )}
       <p className="small-note">
         {capped
           ? 'Request cap reached before the target horizon. Compare at a matched world time.'
@@ -287,7 +312,105 @@ export function ExperimentPanel({ snapshot }: { snapshot: Snapshot | null }) {
       <p className="small-note">{cost.caveat}</p>
       <p className="small-note">
         {cost.groups.reduce((n, g) => n + g.potentiallyUnreportedCalls, 0)} error/cancelled calls
-        may have unreported usage. API latency uses real time; queue delay uses world time.
+        may have unreported usage. API latency uses real time; queue delay uses{' '}
+        {mechanism.settings.researchClock ? 'real time while biology waits' : 'world time'}.
+      </p>
+    </section>
+  );
+}
+
+export function MechanismPanel({ snapshot }: { snapshot: Snapshot | null }) {
+  if (!snapshot) return null;
+  const m = mechanismSummary(snapshot.world);
+  return (
+    <section className="side-panel">
+      <h2>Active mechanisms</h2>
+      <p className="small-note">
+        These settings affected this recorded frame. Preview-only sliders do not affect the engine.
+      </p>
+      {(
+        [
+          ['Paired reproduction and development', m.settings.demographics],
+          ['Finite resources and hunting costs', m.settings.resources],
+          ['Local sensing and persistent decisions', m.settings.decisions],
+          ['Local signals', m.settings.communication],
+        ] as const
+      ).map(([label, active]) => (
+        <div className="compact-row" key={label}>
+          <span>{label}</span>
+          <b>{active ? 'On' : 'Off'}</b>
+        </div>
+      ))}
+      <div className="compact-row">
+        <span>Arrivals</span>
+        <b>{m.immigration}</b>
+      </div>
+      <div className="compact-row">
+        <span>Agent objective</span>
+        <b>{m.objective}</b>
+      </div>
+      {m.demographics?.map((group) => (
+        <article key={group.id}>
+          <h3>{group.label}</h3>
+          <div className="compact-row">
+            <span>Adults / juveniles</span>
+            <b>
+              {group.adults} / {group.juveniles}
+            </b>
+          </div>
+          <div className="compact-row">
+            <span>Dependent young / pregnant</span>
+            <b>
+              {group.dependent} / {group.pregnant}
+            </b>
+          </div>
+        </article>
+      ))}
+      {m.settings.demographics && (
+        <p className="small-note">
+          {m.counters.conceptions ?? 0} conceptions · {(m.counters.careEnergy ?? 0).toFixed(1)}{' '}
+          energy transferred from parents. Dependent young are included in juveniles.
+        </p>
+      )}
+      {m.resources && (
+        <>
+          <h3>Resource accounting</h3>
+          <div className="compact-row">
+            <span>Attack attempts / carcasses remaining</span>
+            <b>
+              {m.counters.attackAttempts ?? 0} / {m.resources.carcasses}
+            </b>
+          </div>
+          <div className="compact-row">
+            <span>Carcass energy created</span>
+            <b>{m.resources.created.toFixed(1)}</b>
+          </div>
+          <div className="compact-row">
+            <span>Eaten + decayed + remaining</span>
+            <b>
+              {m.resources.eaten.toFixed(1)} + {m.resources.decayed.toFixed(1)} +{' '}
+              {m.resources.remaining.toFixed(1)}
+            </b>
+          </div>
+          <p className="small-note">
+            Carcass balance residual: {m.resources.residual.toExponential(2)} energy units. This is
+            not a whole-ecosystem energy budget.
+          </p>
+          <div className="compact-row">
+            <span>Water remaining / capacity</span>
+            <b>
+              {m.resources.waterRemaining.toFixed(0)} / {m.resources.waterCapacity}
+            </b>
+          </div>
+          <div className="compact-row">
+            <span>Depleted water tiles</span>
+            <b>{m.resources.depletedWaterTiles}</b>
+          </div>
+        </>
+      )}
+      <p className="small-note">
+        Illustrative simulation units; these mechanisms are not field-calibrated wildlife
+        predictions. One run cannot establish a survival benefit.
       </p>
     </section>
   );

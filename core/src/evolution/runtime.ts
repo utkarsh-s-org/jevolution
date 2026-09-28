@@ -122,9 +122,13 @@ export class SimulationRuntime {
     const inFlight = this.zeros();
     for (const item of this.active.values()) inFlight[item.lineage]++;
     const backlog = this.zeros();
-    for (const r of this.actors())
-      if (!r.pending && (r.nextDecision ?? 0) <= this.world.time && canReconsider(this.world, r))
-        backlog[r.lineage!]++;
+    if (this.config.experiments?.researchClock) {
+      for (const job of this.researchQueue ?? []) backlog[job.animal.lineage!]++;
+    } else {
+      for (const r of this.actors())
+        if (!r.pending && (r.nextDecision ?? 0) <= this.world.time && canReconsider(this.world, r))
+          backlog[r.lineage!]++;
+    }
     return {
       running: this.running,
       clock: {

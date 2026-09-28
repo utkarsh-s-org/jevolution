@@ -23,7 +23,7 @@ export function validateExperiments(input: unknown): Experiments {
     throw new Error('Invalid mechanism settings.');
   const result = { ...BASELINE_EXPERIMENTS };
   for (const [key, value] of Object.entries(input)) {
-    if (!(key in result)) throw new Error(`Unknown mechanism: ${key}`);
+    if (!Object.hasOwn(result, key)) throw new Error(`Unknown mechanism: ${key}`);
     if (key === 'goal') {
       if (value !== 'individual' && value !== 'lineage') throw new Error('Invalid objective');
       result.goal = value;

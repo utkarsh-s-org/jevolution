@@ -1,3 +1,4 @@
+import { BASELINE_EXPERIMENTS, LIFE } from './experiments.js';
 import type { Snapshot, World } from './types.js';
 
 // Explicit model IDs only: aliases/custom models must not inherit an unrelated price.
@@ -84,17 +85,69 @@ export function distribution(values: number[]) {
   };
 }
 
+export function mechanismSummary(world: World) {
+  const settings = world.experiments ?? BASELINE_EXPERIMENTS;
+  const counters = world.mechanisms ?? {};
+  const remaining = (world.carcasses ?? []).reduce((sum, c) => sum + c.energy, 0);
+  const waterTiles = world.tiles.filter((tile) => tile.kind === 'water');
+  return {
+    settings,
+    immigration: settings.demographics
+      ? settings.immigration
+      : world.scenario === 'predatorPrey'
+        ? 'baseline continuous arrivals'
+        : 'none',
+    objective: settings.decisions ? settings.goal : 'original scenario prompt',
+    demographics: settings.demographics
+      ? world.groups.map((group) => {
+          const wolf = group.species === 'wolf';
+          const animals = (wolf ? world.wolves : world.rabbits).filter(
+            (animal) => animal.lineage === group.id,
+          );
+          const life = LIFE[wolf ? 'wolf' : 'rabbit'];
+          return {
+            id: group.id,
+            label: group.label,
+            dependent: animals.filter((a) => (a.age ?? 0) < life.dependent).length,
+            juveniles: animals.filter((a) => (a.age ?? 0) < life.maturity).length,
+            adults: animals.filter((a) => (a.age ?? 0) >= life.maturity).length,
+            pregnant: animals.filter((a) => a.life?.pregnancy).length,
+          };
+        })
+      : null,
+    resources: settings.resources
+      ? {
+          carcasses: world.carcasses?.length ?? 0,
+          created: counters.carcassEnergyCreated ?? 0,
+          eaten: counters.carcassEnergyEaten ?? 0,
+          decayed: counters.carcassDecay ?? 0,
+          remaining,
+          residual:
+            (counters.carcassEnergyCreated ?? 0) -
+            (counters.carcassEnergyEaten ?? 0) -
+            (counters.carcassDecay ?? 0) -
+            remaining,
+          waterRemaining: waterTiles.reduce((sum, tile) => sum + (tile.water ?? 100), 0),
+          waterCapacity: waterTiles.length * 100,
+          depletedWaterTiles: waterTiles.filter((tile) => (tile.water ?? 100) <= 0.01).length,
+        }
+      : null,
+    counters,
+  };
+}
+
 export function experimentReport(snapshot: Snapshot, initial?: World) {
   const { world, status } = snapshot;
   const requested = Object.values(world.stats).reduce((n, s) => n + s.requested, 0);
   const horizonReached = world.time >= status.config.maxSeconds;
   const requestCapReached = requested >= status.config.maxRequests;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: status.runId,
     seed: world.seed,
     clock: status.clock ?? null,
     mechanisms: world.mechanisms ?? {},
+    mechanismSummary: mechanismSummary(world),
     scenario: world.scenario ?? 'arena',
     simulationSeconds: world.time,
     targetSeconds: status.config.maxSeconds,
@@ -135,9 +188,12 @@ export function experimentReport(snapshot: Snapshot, initial?: World) {
     }),
     caveats: [
       'Replay reconstructs recorded states; it is not a deterministic rerun of fresh model calls.',
-      'Queue delay is recorded in simulated time; API latency is wall-clock time.',
+      status.config.experiments?.researchClock
+        ? 'Research queue and API latency use wall time. Biological time is frozen during requests; simulation queue is zero.'
+        : 'Queue delay is recorded in simulated time; API latency is wall-clock time. Wall-equivalent queue is derived from time scale, not directly measured.',
       'A request-capped run is incomplete for a fixed-duration comparison.',
       'Population-accounting residuals flag missing/unmodeled changes rather than hiding them.',
+      'Mechanism coefficients use illustrative simulation units, not field-calibrated species parameters.',
     ],
   };
 }

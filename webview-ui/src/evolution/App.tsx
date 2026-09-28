@@ -26,6 +26,7 @@ import {
   ExperimentPanel,
   InheritedTraits,
   LatencyPanel,
+  MechanismPanel,
   PopulationOutcomes,
 } from './GroupPanels.js';
 import { arenaRequest, HOSTED, hostedClient } from './hostedClient.js';
@@ -743,6 +744,7 @@ export default function App() {
                 <LatencyPanel snapshot={replay.shown} />
               </div>
               <div className="analytics-column">
+                <MechanismPanel snapshot={replay.shown} />
                 <InheritedTraits snapshot={replay.shown} />
               </div>
               <div className="analytics-column">
@@ -985,6 +987,7 @@ export default function App() {
                 Timing mode
                 <select
                   value={config.timing}
+                  disabled={config.experiments?.researchClock}
                   onChange={(e) =>
                     setConfig({ ...config, timing: e.target.value as RunConfig['timing'] })
                   }
@@ -1002,7 +1005,14 @@ export default function App() {
                     min: 100,
                     max: 15000,
                   },
-                  { key: 'maxInFlight', label: 'Concurrent calls / lineage', min: 1, max: 8 },
+                  {
+                    key: 'maxInFlight',
+                    label: config.experiments?.researchClock
+                      ? 'Concurrent calls / entire round'
+                      : 'Concurrent calls / lineage',
+                    min: 1,
+                    max: 8,
+                  },
                   {
                     key: 'equalizedMs',
                     label: 'Equalized response slot (ms)',
@@ -1018,6 +1028,12 @@ export default function App() {
                   {item.label}
                   <input
                     type="number"
+                    disabled={
+                      config.experiments?.researchClock &&
+                      ['deadlineMs', 'decisionIntervalMs', 'equalizedMs', 'timeScale'].includes(
+                        item.key,
+                      )
+                    }
                     min={item.min}
                     max={item.max}
                     value={config[item.key] ?? 1}

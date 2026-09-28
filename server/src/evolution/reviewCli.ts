@@ -43,7 +43,9 @@ async function main() {
     if (!['GET', 'HEAD'].includes(request.method))
       return reply
         .code(403)
-        .send({ error: 'This recording is read-only. Use port 4321 for a new local experiment.' });
+        .send({
+          error: 'This recording is read-only. Open the live app for a new local experiment.',
+        });
   });
   app.get('/api/arena/state', async () => readonly(structuredClone(original)));
   app.get('/api/arena/report', async () => report);
