@@ -8,7 +8,7 @@ import { createWorld, groupPopulation } from '../../../core/src/evolution/world.
 import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
 
 function percentile(values: number[], p: number) {
-  if (!values.length) return '—';
+  if (!values.length) return 'N/A';
   const sorted = [...values].sort((a, b) => a - b);
   return `${Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))])} ms`;
 }
@@ -137,7 +137,7 @@ export function InheritedTraits({ snapshot }: { snapshot: Snapshot | null }) {
               <div key={g.id}>
                 <div className="compact-row">
                   <span>{g.label}</span>
-                  <span>{v === undefined ? '—' : Math.round(v * 100)}</span>
+                  <span>{v === undefined ? 'N/A' : Math.round(v * 100)}</span>
                 </div>
                 <div className="trait-track">
                   <i

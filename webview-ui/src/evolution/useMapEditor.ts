@@ -9,6 +9,7 @@ import {
 } from '../../../core/src/evolution/mapEditor.js';
 import { isTerrainStamp, TERRAIN_STAMP_SIZE } from '../../../core/src/evolution/terrain.js';
 import type { Point, Snapshot } from '../../../core/src/evolution/types.js';
+import { arenaRequest } from './hostedClient.js';
 
 type Edits = Map<number, MapEdit>;
 interface Draft {
@@ -140,17 +141,11 @@ export function useMapEditor(
       setSaving(true);
       setError('');
       try {
-        const response = await fetch('/api/arena/map', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            runId: draft.base.status.runId,
-            revision: draft.base.world.mapRevision || 0,
-            edits: [...draft.edits.values()],
-          }),
+        const data = await arenaRequest('map', {
+          runId: draft.base.status.runId,
+          revision: draft.base.world.mapRevision || 0,
+          edits: [...draft.edits.values()],
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Could not apply map changes.');
         onSaved(data);
         setDraft(null);
       } catch (e) {

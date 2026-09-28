@@ -112,7 +112,7 @@ export function ReliefPanel({
                   <b>
                     {responses.length
                       ? `${responses[Math.floor(responses.length / 2)].toFixed(1)}s`
-                      : '—'}
+                      : 'N/A'}
                   </b>
                 </div>
                 {report && (

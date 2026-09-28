@@ -109,7 +109,7 @@ export function OrganismInspector({
           <p className="small-note">
             Age {Math.floor(rabbit.age)}s ·{' '}
             {rabbit.parents.length ? `Parents #${rabbit.parents.join(' + #')}` : 'Founder'} · Last
-            call {rabbit.lastLatency === null ? '—' : `${Math.round(rabbit.lastLatency)} ms`}
+            call {rabbit.lastLatency === null ? 'N/A' : `${Math.round(rabbit.lastLatency)} ms`}
           </p>
           <p
             className="small-note"
@@ -167,7 +167,7 @@ export function OrganismInspector({
               <div className="compact-row">
                 <span>Mate / parents</span>
                 <b>
-                  {wolf.mateId ? `#${wolf.mateId}` : '—'} /{' '}
+                  {wolf.mateId ? `#${wolf.mateId}` : 'N/A'} /{' '}
                   {(wolf.parents ?? (wolf.parentId ? [wolf.parentId] : []))
                     .map((id) => `#${id}`)
                     .join(' + ') || 'Founder'}
@@ -189,7 +189,7 @@ export function OrganismInspector({
             {wolfGroup?.controller === 'deterministic'
               ? 'Not applicable · deterministic'
               : wolf.lastLatency == null
-                ? '—'
+                ? 'N/A'
                 : `${Math.round(wolf.lastLatency)} ms`}
           </p>
         </>

@@ -98,3 +98,20 @@ If Start reports missing keys, check that `.env.arena` is beside `package.json` 
 ## License
 
 [MIT](LICENSE). See the repository's license and asset notices for applicable terms.
+
+## Hosted run password
+
+The public site can be explored without signing in. Start and Unlock ask for a shared
+password before hosted model calls are allowed. Set `ARENA_ACCESS_CODE` to at least
+24 random characters in the Vercel project's Production and Preview environments.
+Keep it server-only, outside Git, and never prefix it with `VITE_`.
+
+The server verifies the password and every model request. Successful login creates a
+one-hour signed, HttpOnly, Secure, SameSite=Strict cookie. Lock pauses this browser's
+simulation and clears its cookie. Expired sessions pause on their next model request.
+Changing the secret and redeploying invalidates all existing sessions. Share the
+password only with people allowed to spend the configured API credits.
+
+This is shared-password access control, not per-user billing or a global spending cap.
+Local `npm run arena` remains a loopback development server using your local keys;
+it does not use hosted password authentication.

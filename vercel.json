@@ -1,6 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --no-audit --no-fund",
+  "buildCommand": "npm run arena:deploy:build",
+  "outputDirectory": "dist/arena",
+  "functions": {
+    "api/arena/*.ts": { "maxDuration": 30 }
+  },
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": {
+      "**": false,
+      "main": true
+    }
   }
 }

@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_CONFIG,
   DEFAULT_GROUPS,
+  DEFAULT_SEED,
   GRID,
   PREDATOR_PREY_GROUPS,
   PROVIDER_KEYS,
   SCENARIO_CONFIG,
 } from '../../../core/src/evolution/constants.js';
+import { defaultExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
 import type {
   Lineage,
   ModelGroup,
@@ -18,6 +20,7 @@ import type {
 import { groupPopulation } from '../../../core/src/evolution/world.js';
 import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
 import { DecisionPanel } from './DecisionPanel.js';
+import { ExperimentControls } from './ExperimentControls.js';
 import { FieldGuide } from './FieldGuide.js';
 import {
   ExperimentPanel,
@@ -25,6 +28,7 @@ import {
   LatencyPanel,
   PopulationOutcomes,
 } from './GroupPanels.js';
+import { arenaRequest, HOSTED, hostedClient } from './hostedClient.js';
 import { MapEditor } from './MapEditor.js';
 import { ModelSettings } from './ModelSettings.js';
 import { OrganismInspector } from './OrganismInspector.js';
@@ -32,6 +36,7 @@ import { PopulationChart } from './PopulationChart.js';
 import { RabbitDistributions } from './RabbitDistributions.js';
 import { ReliefPanel } from './ReliefPanel.js';
 import { attachRenderer } from './renderer.js';
+import { RunAccessDialog } from './RunAccessDialog.js';
 import { useArenaFullscreen } from './useArenaFullscreen.js';
 import { useMapEditor } from './useMapEditor.js';
 import { useReplay } from './useReplay.js';
@@ -44,6 +49,7 @@ const time = (seconds: number) =>
     .padStart(2, '0')}`;
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [showAccess, setShowAccess] = useState(false);
   const replay = useReplay(snapshot);
   const editor = useMapEditor(snapshot, replay.reviewing, setSnapshot);
   const editing = useRef(editor);
@@ -83,7 +89,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [config, setConfig] = useState<RunConfig>({ ...DEFAULT_CONFIG });
-  const [seed, setSeed] = useState(271828);
+  const [seed, setSeed] = useState(DEFAULT_SEED);
   const canvas = useRef<HTMLCanvasElement>(null);
   const latest = useRef<Snapshot | null>(null);
   latest.current = editor.preview || replay.shown;
@@ -109,6 +115,11 @@ export default function App() {
     return () => observer.disconnect();
   }, [view, editor.open]);
   useEffect(() => {
+    if (HOSTED)
+      return hostedClient().subscribe((next) => {
+        setSnapshot(next);
+        setConnected(true);
+      });
     const events = new EventSource('/api/arena/events');
     events.onmessage = (event) => {
       const data = JSON.parse(event.data) as Snapshot;
@@ -146,20 +157,18 @@ export default function App() {
     return () => instance.dispose();
   }, []);
   async function control(action: string) {
+    if (HOSTED && action === 'start' && !hostedClient().authenticated) {
+      setShowAccess(true);
+      return;
+    }
     if (action === 'start' || action === 'reset') replay.goLive();
     setBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/arena/control', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          ...(action === 'reset' ? { seed, config, groups: groupsDraft } : {}),
-        }),
+      const data = await arenaRequest('control', {
+        action,
+        ...(action === 'reset' ? { seed, config, groups: groupsDraft } : {}),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Control failed');
       setSnapshot(data as Snapshot);
       if (action === 'reset') {
         selectAnimal(null);
@@ -301,7 +310,7 @@ export default function App() {
               editor.open ||
               busy ||
               !connected ||
-              (!liveStatus?.running && !!missingKeys)
+              (!HOSTED && !liveStatus?.running && !!missingKeys)
             }
             onClick={() => void control(liveStatus?.running ? 'pause' : 'start')}
           >
@@ -317,8 +326,12 @@ export default function App() {
             aria-label="Open run settings"
             disabled={editor.open || !!liveStatus?.readOnly}
             onClick={() => {
-              setConfig(liveStatus?.config || DEFAULT_CONFIG);
-              setSeed(snapshot?.world.seed || 271828);
+              setConfig({
+                ...(liveStatus?.config || DEFAULT_CONFIG),
+                experimentPreview:
+                  liveStatus?.config.experimentPreview ?? defaultExperimentPreview(),
+              });
+              setSeed(snapshot?.world.seed || DEFAULT_SEED);
               setGroupsDraft(snapshot?.world.groups || DEFAULT_GROUPS);
               setShowSettings(true);
             }}
@@ -362,13 +375,38 @@ export default function App() {
             </svg>
           </button>
         </div>
-        <a className="export-link" href="/api/arena/export" download>
-          Export snapshot ↓
-        </a>
-        {!liveStatus?.running && (
+        {!HOSTED && (
+          <a className="export-link" href="/api/arena/export" download>
+            Export snapshot ↓
+          </a>
+        )}
+        {!HOSTED && !liveStatus?.running && (
           <a className="export-link" href="/api/arena/bundle" download>
             Full experiment bundle ↓
           </a>
+        )}
+        {HOSTED && (
+          <button
+            className="export-link"
+            onClick={() => {
+              void arenaRequest('export')
+                .then((data) => {
+                  const url = URL.createObjectURL(
+                    new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), ...data })], {
+                      type: 'application/json',
+                    }),
+                  );
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `jevolution-${data.status.runId}.json`;
+                  link.click();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                })
+                .catch((error: Error) => setError(error.message));
+            }}
+          >
+            Export snapshot ↓
+          </button>
         )}
       </div>
       {editor.open && (
@@ -440,10 +478,50 @@ export default function App() {
         </nav>
         <div className="top-meta">
           <span className={`connection-dot ${connected ? 'connected' : ''}`} />
-          {connected ? 'LOCAL SERVER' : 'CONNECTING'}
+          {connected
+            ? HOSTED
+              ? hostedClient().authenticated
+                ? 'UNLOCKED'
+                : 'PUBLIC DEMO'
+              : 'LOCAL SERVER'
+            : 'CONNECTING'}
+          {HOSTED && (
+            <button
+              className="secondary-button session-button"
+              disabled={busy || !connected}
+              onClick={async () => {
+                if (!hostedClient().authenticated) {
+                  setShowAccess(true);
+                  return;
+                }
+                setBusy(true);
+                try {
+                  await hostedClient().request('pause', { reason: 'Simulation locked.' });
+                  const response = await fetch('/api/arena/session', { method: 'DELETE' });
+                  if (!response.ok) throw new Error('Could not lock this session. Try again.');
+                  await hostedClient().request('refresh');
+                } catch (error) {
+                  setError(error instanceof Error ? error.message : 'Could not lock session.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {hostedClient().authenticated ? 'Lock' : 'Unlock'}
+            </button>
+          )}
         </div>
       </header>
       <main className={view === 'habitat' ? 'habitat-main' : undefined}>
+        {showAccess && (
+          <RunAccessDialog
+            onClose={() => setShowAccess(false)}
+            onUnlock={async () => {
+              await hostedClient().request('refresh');
+              setShowAccess(false);
+            }}
+          />
+        )}
         {view !== 'habitat' && populationSummary}
         {error && (
           <div className="error-banner" role="alert">
@@ -708,7 +786,7 @@ export default function App() {
           </section>
         )}
         {view === 'guide' && <FieldGuide onReturn={() => navigate('habitat')} />}
-        {view === 'analytics' && missingKeys && (
+        {view === 'analytics' && missingKeys && !HOSTED && (
           <section className="setup-panel">
             <div>
               <span className="eyebrow">CONNECT YOUR MODELS</span>
@@ -762,7 +840,7 @@ export default function App() {
               <br />
               Recorded usage estimate:{' '}
               {status?.estimatedCost === null || !status
-                ? '—'
+                ? 'N/A'
                 : `$${status.estimatedCost.toFixed(4)}`}{' '}
               · excludes unreported interrupted calls
             </span>
@@ -829,7 +907,10 @@ export default function App() {
                 onChange={(e) => {
                   const next = e.target.value as Scenario;
                   // Each scenario starts from its own defaults; the arena keeps its roster.
-                  setConfig({ ...SCENARIO_CONFIG[next] });
+                  setConfig({
+                    ...SCENARIO_CONFIG[next],
+                    experimentPreview: config.experimentPreview,
+                  });
                   setGroupsDraft(
                     next === 'predatorPrey'
                       ? PREDATOR_PREY_GROUPS
@@ -857,6 +938,11 @@ export default function App() {
                 ready={liveStatus?.providerReady}
               />
             )}
+            <ExperimentControls
+              value={config.experimentPreview}
+              disabled={!!liveStatus?.running || busy}
+              onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
+            />
             <div className="settings-grid">
               <div className="seed-setting">
                 <label htmlFor="habitat-seed">Habitat seed</label>
