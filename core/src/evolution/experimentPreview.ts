@@ -1,4 +1,7 @@
-// Versioned experiment parameters. Legacy preview records remain unapplied.
+import { DEFAULT_GROUPS, PREDATOR_PREY_GROUPS, rulesFor } from './constants.js';
+import type { ModelGroup, Scenario } from './types.js';
+
+// Legacy preview records remain unapplied. Active defaults preserve the selected preset.
 export const EXPERIMENT_GROUPS = [
   {
     name: 'Communication',
@@ -105,13 +108,13 @@ export const EXPERIMENT_GROUPS = [
       },
       {
         key: 'disasterSeverity',
-        label: 'Drought severity',
+        label: 'Drought strength',
         min: 0,
-        max: 100,
+        max: 200,
         step: 5,
-        initial: 50,
+        initial: 100,
         unit: '%',
-        help: 'Reduction in food growth during a drought.',
+        help: '100% keeps the scenario’s drought. 0% removes growth loss and withering; 200% stops regrowth and doubles withering.',
       },
       {
         key: 'disasterArea',
@@ -193,13 +196,24 @@ export interface ExperimentPreview {
   appliedToSimulation: boolean;
   values: Record<ExperimentKey, number>;
 }
-export function defaultExperimentPreview(): ExperimentPreview {
+export function defaultExperimentPreview(
+  scenario: Scenario = 'arena',
+  groups: readonly ModelGroup[] = scenario === 'predatorPrey'
+    ? PREDATOR_PREY_GROUPS
+    : DEFAULT_GROUPS,
+): ExperimentPreview {
   return {
     mode: 'active',
     appliedToSimulation: true,
-    values: Object.fromEntries(
-      EXPERIMENT_GROUPS.flatMap((g) => g.controls.map((c) => [c.key, c.initial])),
-    ) as Record<ExperimentKey, number>,
+    values: {
+      ...(Object.fromEntries(
+        EXPERIMENT_GROUPS.flatMap((g) => g.controls.map((c) => [c.key, c.initial])),
+      ) as Record<ExperimentKey, number>),
+      wolfVision: rulesFor({ scenario }).wolfSight,
+      wolfCount: groups
+        .filter((g) => g.species === 'wolf')
+        .reduce((n, g) => n + (g.population || 0), 0),
+    },
   };
 }
 export function validateExperimentPreview(input: unknown): ExperimentPreview | undefined {

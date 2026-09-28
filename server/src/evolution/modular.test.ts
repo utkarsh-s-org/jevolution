@@ -10,6 +10,8 @@ import {
   DEFAULT_GROUPS,
   MODEL_PRESETS,
   PROVIDER_KEYS,
+  rulesFor,
+  SCENARIO_CONFIG,
   validateGroups,
 } from '../../../core/src/evolution/constants.js';
 import {
@@ -31,6 +33,32 @@ function roster(n: number): ModelGroup[] {
     delayMs: 0,
   }));
 }
+test('resetting untouched settings or changing only timing preserves either scenario baseline', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-baseline-'));
+  const runtime = new ArenaRuntime(directory);
+  try {
+    for (const scenario of ['arena', 'predatorPrey'] as const) {
+      const config = { ...SCENARIO_CONFIG[scenario] };
+      const groups = DEFAULT_GROUPS.map((g) => ({
+        ...g,
+        population: g.species === 'wolf' ? 6 : g.population,
+      }));
+      runtime.reset(123, config, groups);
+      const baseline = structuredClone(runtime.world);
+      runtime.reset(123, { ...config, deadlineMs: 1500 }, groups);
+      assert.deepEqual(runtime.world, baseline);
+      const experimentPreview = defaultExperimentPreview(scenario, runtime.world.groups);
+      // Living population must not become the starting population when settings are opened.
+      runtime.world.wolves.splice(0, 2);
+      runtime.reset(123, { ...config, experimentPreview }, groups);
+      assert.deepEqual({ ...runtime.world, experiment: undefined }, baseline);
+      assert.deepEqual(rulesFor(runtime.world), rulesFor(baseline));
+    }
+  } finally {
+    runtime.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 test('preview controls survive snapshots and replay without changing the seeded world or observations', () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-preview-'));
   const runtime = new ArenaRuntime(directory);

@@ -3,17 +3,23 @@ import {
   EXPERIMENT_GROUPS,
   type ExperimentPreview,
 } from '../../../core/src/evolution/experimentPreview.js';
+import type { ModelGroup, Scenario } from '../../../core/src/evolution/types.js';
 
 export function ExperimentControls({
   value,
   onChange,
   disabled,
+  scenario,
+  groups,
 }: {
   value?: ExperimentPreview;
   onChange: (value: ExperimentPreview) => void;
   disabled: boolean;
+  scenario: Scenario;
+  groups: readonly ModelGroup[];
 }) {
-  const draft = value ?? defaultExperimentPreview();
+  // Old UI-only proposals must not become active when a different slider is edited.
+  const draft = value?.appliedToSimulation ? value : defaultExperimentPreview(scenario, groups);
   function group(index: number) {
     const section = EXPERIMENT_GROUPS[index];
     return (
@@ -66,7 +72,8 @@ export function ExperimentControls({
       <div className="experiment-body">
         <p className="experiment-notice">
           Settings take effect when you reset the habitat. Effective values are included in exported
-          runs. Temperature uses illustrative rules, not a calibrated biological model.
+          runs. Untouched controls preserve this scenario. Temperature uses illustrative rules, not
+          a calibrated biological model.
         </p>
         {group(0)}
         {group(1)}
@@ -82,7 +89,7 @@ export function ExperimentControls({
           type="button"
           className="secondary-button"
           disabled={disabled}
-          onClick={() => onChange(defaultExperimentPreview())}
+          onClick={() => onChange(defaultExperimentPreview(scenario, groups))}
         >
           Reset experiment values
         </button>

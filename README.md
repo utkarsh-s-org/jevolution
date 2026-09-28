@@ -102,10 +102,12 @@ Open http://127.0.0.1:5174/arena.html. The existing local server command above r
 
 All experiment controls apply when resetting the habitat and are included in exported configuration. Legacy records marked preview-only retain their original, unapplied meaning.
 
+Opening settings does not activate experiment overrides. Untouched controls and changes to timing alone preserve the selected scenario's rules, starting populations, seeded food, and random sequence. Experiment defaults use that scenario's wolf vision and configured starting roster. Switching scenarios resets experiment overrides to the new preset.
+
 - Communication: sociability scales the selected maximum range from 37.5% to 100%. Delay is simulation milliseconds; message loss is a seeded draw per emission. Cost is the selected base times (1 + sociability). Lost messages still cost energy. Signal lifetime begins at delivery.
 - Resources: abundance scales capacity and initial food. Clustering blends uniform supply with generated patches, preserving total capacity. Regrowth scales replenishment independently.
 - Temperature: an illustrative model with a 20 C reference. Each degree colder increases base rabbit and wolf metabolism 2%; each degree hotter increases rabbit thirst 4%. Food growth decreases 2.5% per degree away from 20 C, floored at 10%. These are experiment assumptions, not validated animal physiology.
-- Drought: regular 60-second events at the selected frequency per simulation hour. A seeded center selects the nearest tiles covering the requested fraction. Severity reduces local regrowth and scales withering. Automatic droughts are disabled at zero frequency; manual drought uses the same severity and area.
+- Drought: regular 60-second events at the selected frequency per simulation hour. Partial coverage uses a seeded center; full coverage preserves the original global drought. Strength is relative to the scenario: 100% keeps its drought regrowth and withering, 0% removes the growth reduction and withering, and 200% stops regrowth and doubles withering. Intermediate strengths interpolate between these values. Food-regrowth and temperature multipliers apply afterward. Automatic droughts are disabled at zero frequency; manual drought uses the same strength and area.
 - Predators: starting count is divided among configured wolf groups (0 to 20), overriding their starting counts. Speed scales the scenario baseline; vision is in tiles. Population may subsequently change through births, deaths, and scenario immigration.
 - Inheritance: mutation probability applies separately to each trait. Starting diversity rescales founder traits around 0.5, with the existing 0.05 to 0.95 bounds. Model weights stay fixed.
 

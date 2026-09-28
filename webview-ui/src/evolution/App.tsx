@@ -9,7 +9,6 @@ import {
   PROVIDER_KEYS,
   SCENARIO_CONFIG,
 } from '../../../core/src/evolution/constants.js';
-import { defaultExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
 import type {
   Lineage,
   ModelGroup,
@@ -313,16 +312,7 @@ export default function App() {
             aria-label="Open run settings"
             disabled={editor.open}
             onClick={() => {
-              setConfig({
-                ...(liveStatus?.config || DEFAULT_CONFIG),
-                experimentPreview: liveStatus?.config.experimentPreview ?? {
-                  ...defaultExperimentPreview(),
-                  values: {
-                    ...defaultExperimentPreview().values,
-                    wolfCount: snapshot?.world.wolves.length ?? 10,
-                  },
-                },
-              });
+              setConfig({ ...(liveStatus?.config || DEFAULT_CONFIG) });
               setSeed(snapshot?.world.seed || DEFAULT_SEED);
               setGroupsDraft(snapshot?.world.groups || DEFAULT_GROUPS);
               setShowSettings(true);
@@ -872,10 +862,7 @@ export default function App() {
                 onChange={(e) => {
                   const next = e.target.value as Scenario;
                   // Each scenario starts from its own defaults; the arena keeps its roster.
-                  setConfig({
-                    ...SCENARIO_CONFIG[next],
-                    experimentPreview: config.experimentPreview,
-                  });
+                  setConfig({ ...SCENARIO_CONFIG[next] });
                   setGroupsDraft(
                     next === 'predatorPrey'
                       ? PREDATOR_PREY_GROUPS
@@ -899,12 +886,30 @@ export default function App() {
             ) : (
               <ModelSettings
                 groups={groupsDraft}
-                onChange={setGroupsDraft}
+                onChange={(groups) => {
+                  setGroupsDraft(groups);
+                  if (config.experimentPreview?.appliedToSimulation) {
+                    setConfig({
+                      ...config,
+                      experimentPreview: {
+                        ...config.experimentPreview,
+                        values: {
+                          ...config.experimentPreview.values,
+                          wolfCount: groups
+                            .filter((g) => g.species === 'wolf')
+                            .reduce((n, g) => n + (g.population || 0), 0),
+                        },
+                      },
+                    });
+                  }
+                }}
                 ready={liveStatus?.providerReady}
               />
             )}
             <ExperimentControls
               value={config.experimentPreview}
+              scenario={config.scenario ?? 'arena'}
+              groups={groupsDraft}
               disabled={!!liveStatus?.running || busy}
               onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
             />

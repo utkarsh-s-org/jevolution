@@ -276,17 +276,23 @@ export function rulesFor(
   const cold = 1 + Math.max(0, 20 - v.temperature) * 0.02;
   const heat = 1 + Math.max(0, v.temperature - 20) * 0.04;
   const growth = Math.max(0.1, 1 - Math.abs(v.temperature - 20) * 0.025);
+  const growthScale = (v.foodRegrowth / 100) * growth;
+  const droughtStrength = v.disasterSeverity / 100;
+  // Interpolate through the preset, so 100% preserves both of its drought rules.
+  const droughtRegrowth =
+    droughtStrength <= 1
+      ? base.droughtRegrowth + (base.foodRegrowth - base.droughtRegrowth) * (1 - droughtStrength)
+      : base.droughtRegrowth * Math.max(0, 2 - droughtStrength);
   return {
     ...base,
     baseMetabolism: base.baseMetabolism * cold,
     wolfMetabolism: base.wolfMetabolism * cold,
     thirst: base.thirst * heat,
     droughtThirst: base.droughtThirst * heat,
-    foodRegrowth: ((base.foodRegrowth * v.foodRegrowth) / 100) * growth,
-    droughtRegrowth:
-      ((base.foodRegrowth * v.foodRegrowth) / 100) * growth * (1 - v.disasterSeverity / 100),
-    droughtWither: (base.droughtWither * v.disasterSeverity) / 100,
-    wolfSpeed: (base.wolfSpeed * v.wolfSpeed) / 100,
+    foodRegrowth: base.foodRegrowth * growthScale,
+    droughtRegrowth: droughtRegrowth * growthScale,
+    droughtWither: base.droughtWither * droughtStrength,
+    wolfSpeed: base.wolfSpeed * (v.wolfSpeed / 100),
     wolfSight: v.wolfVision,
     signalDelay: v.signalDelay / 1000,
     signalCost: v.signalCost,
