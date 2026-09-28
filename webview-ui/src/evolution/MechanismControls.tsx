@@ -60,6 +60,21 @@ export function MechanismControls({
         </select>
       </label>
       <label>
+        <input
+          type="checkbox"
+          checked={settings.researchClock}
+          onChange={(e) => onChange({ ...settings, researchClock: e.target.checked })}
+        />{' '}
+        #1 Research clock: world pauses for decisions; fixed 50ms physics and 2s decision rounds
+      </label>
+      {settings.researchClock && (
+        <p>
+          Research mode uses one global concurrency limit, freezes observations for each round, and
+          applies returned decisions in a stable order. Simulation speed and equalized response
+          slots do not change biology in this mode. A provider failure pauses the whole experiment.
+        </p>
+      )}
+      <label>
         Immigration with demographics enabled{' '}
         <select
           value={settings.immigration}

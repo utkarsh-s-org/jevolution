@@ -331,6 +331,7 @@ export interface LineageStats {
   outputTokens: number;
   latencies: number[];
   queueMs: number[];
+  queueWallMs?: number[];
   food: number;
   signals: number;
 }
@@ -391,6 +392,13 @@ export interface RunConfig {
   maxSeconds: number;
 }
 export interface PublicStatus {
+  clock?: {
+    mode: 'research' | 'realtime';
+    round: number;
+    roundSeconds: number;
+    phase: string;
+    queued: number;
+  };
   readOnly?: boolean;
   running: boolean;
   reason: string;

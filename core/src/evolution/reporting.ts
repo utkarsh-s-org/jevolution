@@ -93,6 +93,8 @@ export function experimentReport(snapshot: Snapshot, initial?: World) {
     schemaVersion: 1,
     runId: status.runId,
     seed: world.seed,
+    clock: status.clock ?? null,
+    mechanisms: world.mechanisms ?? {},
     scenario: world.scenario ?? 'arena',
     simulationSeconds: world.time,
     targetSeconds: status.config.maxSeconds,
@@ -123,8 +125,11 @@ export function experimentReport(snapshot: Snapshot, initial?: World) {
         cancelled: s.cancelled,
         apiRoundTripMs: distribution(s.latencies),
         queueSimulationMs: distribution(s.queueMs),
+        queueWallMs: distribution(s.queueWallMs ?? []),
         queueWallEquivalentMs: distribution(
-          s.queueMs.map((v) => v / (status.config.timeScale ?? 1)),
+          status.config.experiments?.researchClock
+            ? []
+            : s.queueMs.map((v) => v / (status.config.timeScale ?? 1)),
         ),
       };
     }),
