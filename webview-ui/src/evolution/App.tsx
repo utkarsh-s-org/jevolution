@@ -942,16 +942,6 @@ export default function App() {
                 ready={liveStatus?.providerReady}
               />
             )}
-            <MechanismControls
-              value={config.experiments}
-              disabled={busy}
-              onChange={(experiments) => setConfig({ ...config, experiments })}
-            />
-            <ExperimentControls
-              value={config.experimentPreview}
-              disabled={!!liveStatus?.running || busy}
-              onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
-            />
             <div className="settings-grid">
               <div className="seed-setting">
                 <label htmlFor="habitat-seed">Habitat seed</label>
@@ -1046,6 +1036,16 @@ export default function App() {
               Same observation rules, physical speeds, request concurrency, and action schema.
               Rabbit colors are display labels only. No model outcome is predetermined.
             </p>
+            <ExperimentControls
+              value={config.experimentPreview}
+              disabled={!!liveStatus?.running || busy}
+              onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
+            />
+            <MechanismControls
+              value={config.experiments}
+              disabled={busy}
+              onChange={(experiments) => setConfig({ ...config, experiments })}
+            />
           </div>
           <footer className="settings-footer">
             <button className="secondary-button" onClick={() => setShowSettings(false)}>
