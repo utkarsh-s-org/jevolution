@@ -1,4 +1,7 @@
 import { rulesFor } from './constants.js';
+import { emitWolfSignal, heardSignals, permuteChoices } from './decisionDynamics.js';
+import { compatible, conceive } from './demographics.js';
+import { protectedRabbit, waterSource, wolfNeedsDrink } from './habitat.js';
 import type {
   Decision,
   Point,
@@ -37,8 +40,17 @@ export function finishWolfLife(world: World, wolf: Wolf, moved: number, caught: 
   if (!dynamicWolf(world, wolf)) return;
   wolf.energy = (wolf.energy ?? RULES.wolfFounderEnergy) - moved * RULES.wolfMovementCost;
   if (caught) wolf.energy = Math.min(100, wolf.energy + RULES.wolfMealEnergy);
-  if (wolf.energy <= 0 || wolf.age! > RULES.wolfLifespan) {
-    const cause = wolf.energy <= 0 ? 'starvation' : 'oldAge';
+  if (
+    wolf.energy <= 0 ||
+    wolf.age! > (wolf.life?.deathAge ?? RULES.wolfLifespan) ||
+    (world.experiments?.resources && (wolf.water ?? 80) <= 0)
+  ) {
+    const cause =
+      wolf.energy <= 0
+        ? 'starvation'
+        : world.experiments?.resources && (wolf.water ?? 80) <= 0
+          ? 'dehydration'
+          : 'oldAge';
     world.wolves = world.wolves.filter((w) => w.id !== wolf.id);
     wolf.pending = false;
     const stats = world.stats[wolf.lineage!];
@@ -56,6 +68,7 @@ export function finishWolfLife(world: World, wolf: Wolf, moved: number, caught: 
 export function wolfReadyToMate(world: World, wolf: Wolf): boolean {
   const RULES = rulesFor(world);
   return (
+    !wolf.life?.pregnancy &&
     dynamicWolf(world, wolf) &&
     (wolf.age ?? 0) >= RULES.wolfMaturity &&
     (wolf.age ?? 0) <= RULES.wolfLifespan &&
@@ -70,6 +83,7 @@ export function wolfMate(world: World, wolf: Wolf, id?: number): Wolf | undefine
     (other) =>
       other.id === id &&
       other.id !== wolf.id &&
+      compatible(world, wolf, other) &&
       other.lineage === wolf.lineage &&
       wolfReadyToMate(world, other) &&
       tileAt(world, other)?.kind !== 'shelter' &&
@@ -112,6 +126,7 @@ export function reproduceWolves(world: World) {
             .filter(
               (other) =>
                 other.id !== wolf.id &&
+                compatible(world, wolf, other) &&
                 other.lineage === wolf.lineage &&
                 distance(wolf, other) <= RULES.wolfPairDistance &&
                 wolfReadyToMate(world, wolf) &&
@@ -127,6 +142,10 @@ export function reproduceWolves(world: World) {
           distance(wolf, mate) >= RULES.mateDistance))
     )
       continue;
+    if (world.experiments?.demographics) {
+      conceive(world, wolf, mate);
+      continue;
+    }
     const position = [
       [1, 0],
       [-1, 0],
@@ -171,7 +190,7 @@ export function wolfSeesPrey(world: World, wolf: Wolf, rabbit: Rabbit): boolean 
   const tile = tileAt(world, rabbit);
   return (
     !!tile &&
-    tile.kind !== 'shelter' &&
+    !protectedRabbit(world, rabbit) &&
     visible(
       world,
       wolf,
@@ -188,6 +207,56 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
     .filter((r) => wolfSeesPrey(world, wolf, r))
     .sort((a, b) => distance(wolf, a) - distance(wolf, b) || a.id - b.id);
   const choices: WolfCandidate[] = [];
+  const signals = heardSignals(world, wolf);
+  if (world.experiments?.decisions)
+    for (const leader of world.wolves
+      .filter(
+        (other) =>
+          other.id !== wolf.id &&
+          other.lineage === wolf.lineage &&
+          visible(world, wolf, other, RULES.wolfSight) &&
+          signals.some((s) => s.sender === other.id && s.kind === 'follow'),
+      )
+      .slice(0, 2))
+      choices.push({
+        id: `follow_${leader.id}`,
+        action: 'follow',
+        followId: leader.id,
+        target: center(leader),
+        description: `Follow visible wolf ${leader.id}, which signalled follow. This is optional; tracking stops out of sight.`,
+      });
+  if (world.experiments?.resources) {
+    for (const carcass of (world.carcasses ?? [])
+      .filter((c) => c.energy > 0.1 && visible(world, wolf, c, RULES.wolfSight))
+      .sort((a, b) => distance(wolf, a) - distance(wolf, b))
+      .slice(0, 3)) {
+      if (distance(wolf, carcass) > 0.8 && !findRoute(world, wolf, carcass).length) continue;
+      choices.push({
+        id: `scavenge_${carcass.id}`,
+        action: 'scavenge',
+        carcassId: carcass.id,
+        target: center(carcass),
+        description: `Feed on a visible finite carcass ${distance(wolf, carcass).toFixed(1)} tiles away. About ${carcass.energy.toFixed(0)} energy remains; feeding takes time and other wolves can consume it.`,
+      });
+    }
+    if (wolfNeedsDrink(world, wolf)) {
+      const shores = world.tiles
+        .filter(
+          (t) =>
+            walkable(world, t) &&
+            waterSource(world, t) &&
+            visible(world, wolf, center(t), RULES.wolfSight),
+        )
+        .sort((a, b) => distance(wolf, a) - distance(wolf, b));
+      for (const t of shores.slice(0, 2))
+        choices.push({
+          id: `drink_${t.x}_${t.y}`,
+          action: 'drink',
+          target: center(t),
+          description: `Drink at nearby water. Your hydration is ${(wolf.water ?? 80).toFixed(0)}/100. Water can dry during drought.`,
+        });
+    }
+  }
   // Scent: with no rabbit in sight, head toward the nearest exposed rabbit so wolves can find
   // clustered prey on a big map. Listed first because models favor the first option.
   const scentTarget =
@@ -206,16 +275,21 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
       action: 'mate',
       mateId: mate.id,
       target: center(mate),
-      description: `Reproduce with wolf ${mate.id}. Both must choose each other and meet within ${RULES.mateDistance} tiles. Each parent pays ${RULES.wolfBreedCost} energy and waits ${RULES.wolfBreedCooldown}s before another birth.${mate.mateId === wolf.id ? ' This wolf has chosen you.' : ''}`,
+      description: world.experiments?.demographics
+        ? `Approach compatible wolf ${mate.id}. Automatic conception within ${RULES.wolfPairDistance} tiles when both are eligible. Pups arrive after 24 simulation seconds; both parents reserve newborn energy now.`
+        : `Reproduce with wolf ${mate.id}. Both must choose each other and meet within ${RULES.mateDistance} tiles. Each parent pays ${RULES.wolfBreedCost} energy and waits ${RULES.wolfBreedCooldown}s before another birth.${mate.mateId === wolf.id ? ' This wolf has chosen you.' : ''}`,
     });
-  if (wolf.cooldown <= 0) {
+  if (
+    wolf.cooldown <= 0 &&
+    (!world.experiments?.demographics || (wolf.age ?? 0) >= RULES.wolfMaturity)
+  ) {
     for (const r of prey.slice(0, 6)) {
       if (distance(wolf, r) > 0.8 && !findRoute(world, wolf, r).length) continue;
       choices.push({
         id: `hunt_${r.id}`,
         action: 'hunt',
         preyId: r.id,
-        description: `Hunt visible rabbit ${r.id}, ${distance(wolf, r).toFixed(1)} tiles away. Track only while visible; catching it starts a ${RULES.wolfEatCooldown}-second eating cooldown.`,
+        description: `Hunt visible rabbit ${r.id}, ${distance(wolf, r).toFixed(1)} tiles away. Track only while visible; catching it starts a ${RULES.wolfEatCooldown}-second eating cooldown.${world.experiments?.resources ? ' Feed nearby on its finite carcass; there is no instant energy reward.' : ''}`,
       });
     }
   }
@@ -246,7 +320,12 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
       : 'Stop and wait. Eating cooldown continues to expire.',
   });
   return {
+    ...(world.experiments?.decisions ? { signals } : {}),
     wolf: {
+      ...(world.experiments?.decisions && wolf.life
+        ? { sex: wolf.life.sex, pregnancyDue: wolf.life.pregnancy?.due }
+        : {}),
+      ...(world.experiments?.resources ? { water: wolf.water ?? 80 } : {}),
       id: wolf.id,
       lifeCycle: dynamicWolf(world, wolf) ? 'dynamic' : 'fixed',
       energy: dynamicWolf(world, wolf) ? (wolf.energy ?? RULES.wolfFounderEnergy) : null,
@@ -269,9 +348,9 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
         action: w.action || 'rest',
         ally: w.lineage === wolf.lineage,
         mateId: w.mateId,
-        readyToMate: wolfReadyToMate(world, w),
+        ...(world.experiments?.decisions ? {} : { readyToMate: wolfReadyToMate(world, w) }),
       })),
-    choices,
+    choices: permuteChoices(world, wolf, choices),
   };
 }
 export function applyWolfDecision(
@@ -279,26 +358,55 @@ export function applyWolfDecision(
   wolf: Wolf,
   decision: Decision,
   choices: WolfCandidate[],
+  onReject?: (reason: string) => void,
 ): boolean {
+  const reject = (reason: string) => {
+    onReject?.(reason);
+    return false;
+  };
   const RULES = rulesFor(world);
   const choice = choices.find((c) => c.id === decision.choice);
-  if (!choice || decision.signal !== 'none') return false;
+  const supported =
+    world.experiments?.decisions && world.experiments.communication !== false
+      ? ['none', 'food', 'danger', 'follow']
+      : ['none'];
+  if (!choice || !supported.includes(decision.signal)) return reject('choice-or-signal-invalid');
   let target: Point | undefined = choice.target;
+  if (choice.action === 'follow') {
+    const leader = world.wolves.find(
+      (w) => w.id === choice.followId && visible(world, wolf, w, RULES.wolfSight),
+    );
+    if (!leader) return reject('leader-no-longer-visible');
+    target = leader;
+  }
+  if (
+    choice.action === 'scavenge' &&
+    !(world.carcasses ?? []).some((c) => c.id === choice.carcassId && c.energy > 0.1)
+  )
+    return reject('carcass-depleted');
+  if (choice.action === 'drink' && (!choice.target || !waterSource(world, choice.target)))
+    return reject('water-unavailable');
   if (choice.action === 'hunt') {
     const prey = world.rabbits.find((r) => r.id === choice.preyId);
-    if (wolf.cooldown > 0 || !prey || !wolfSeesPrey(world, wolf, prey)) return false;
+    if (wolf.cooldown > 0 || !prey || !wolfSeesPrey(world, wolf, prey))
+      return reject('prey-unavailable-or-capture-cooldown');
     target = prey;
   }
   if (choice.action === 'mate') {
     const mate = wolfMate(world, wolf, choice.mateId);
-    if (!mate || world.wolves.length >= RULES.wolfPopulationCap) return false;
+    if (!mate || world.wolves.length >= RULES.wolfPopulationCap)
+      return reject('mate-unavailable-or-population-cap');
     target = mate;
   }
   if (target && (!walkable(world, target) || !visible(world, wolf, target, RULES.wolfSight)))
-    return false;
+    return reject('target-not-visible-or-walkable');
   const route = target ? findRoute(world, wolf, target) : [];
-  if (target && distance(wolf, target) > 0.8 && !route.length) return false;
+  if (target && distance(wolf, target) > 0.8 && !route.length) return reject('route-unavailable');
   wolf.action = choice.action;
+  wolf.followId = choice.followId;
+  if (world.experiments?.decisions) wolf.committedUntil = world.time + 2;
+  emitWolfSignal(world, wolf, decision.signal);
+  if (choice.carcassId !== undefined || choice.action !== 'rest') wolf.carcassId = choice.carcassId;
   wolf.target = choice.preyId;
   wolf.mateId = choice.mateId;
   wolf.path = route;

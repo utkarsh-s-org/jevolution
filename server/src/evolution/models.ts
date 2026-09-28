@@ -3,7 +3,9 @@ import {
   PREDATOR_PREY_RULES as PP,
   PROVIDER_KEYS,
   RULES,
+  rulesFor,
 } from '../../../core/src/evolution/constants.js';
+import { type Experiments, LIFE } from '../../../core/src/evolution/experiments.js';
 import { ProviderError } from '../../../core/src/evolution/providerError.js';
 import type {
   Decision,
@@ -54,36 +56,101 @@ export function providerReadiness() {
     Object.entries(PROVIDER_KEYS).map(([p, key]) => [p, !!process.env[key]]),
   ) as Record<ModelGroup['provider'], boolean>;
 }
-function validateDecision(value: unknown, observation: ModelObservation): Decision {
+function validateDecision(
+  value: unknown,
+  observation: ModelObservation,
+  allowedSignals: string[],
+): Decision {
   if (!value || typeof value !== 'object') throw new ProviderError('Malformed decision object');
   const d = value as Record<string, unknown>;
   if (
     typeof d.choice !== 'string' ||
     !observation.choices.some((c) => c.id === d.choice) ||
     typeof d.signal !== 'string' ||
-    !('wolf' in observation ? ['none'] : ['none', 'danger', 'food', 'follow', 'help']).includes(
-      d.signal,
-    )
+    !allowedSignals.includes(d.signal)
   )
     throw new ProviderError('Provider returned an invalid choice or signal');
   return { choice: d.choice, signal: d.signal as Decision['signal'] };
+}
+export interface DecisionOptions {
+  relief?: boolean;
+  predatorPrey?: boolean;
+  experiments?: Experiments;
+}
+export function instructionsFor(
+  isWolf: boolean,
+  { relief = true, predatorPrey = false, experiments }: DecisionOptions = {},
+) {
+  let instructions = isWolf
+    ? predatorPrey
+      ? PREDATOR_PREY_WOLF_INSTRUCTIONS
+      : WOLF_INSTRUCTIONS
+    : relief
+      ? INSTRUCTIONS
+      : PREY_INSTRUCTIONS;
+  if (experiments?.demographics) {
+    const species = isWolf ? 'wolf' : 'rabbit';
+    const life = LIFE[species];
+    instructions = `You control one ${species} in an experimental predator-prey ecosystem. Choose exactly one supplied legal action. Survive, maintain energy and hydration where relevant, and reproduce. Use only local observations. Reproduction is automatic only when eligible opposite-sex adults of your group meet within 1.7 tiles; it never happens alone. The female gestates for ${life.gestation} simulation seconds, then bears up to ${life.litter} offspring. Newborns depend on parents for ${life.dependent} seconds and mature at ${life.maturity} seconds. Parents reserve newborn energy at conception. Finite lifespans and population caps apply. Animals inherit traits, not learned model weights. Movement continues until replaced; hunting tracks only visible prey, shelters exclude attacks and hiding limits sight. Food choices eat on arrival. Rest does not restore energy. Optional local rabbit signals cost energy; wolves cannot signal. Follow the supplied choice descriptions. These are illustrative simulation units, not calibrated animal behavior. Return the action and signal without explanation.`;
+  }
+  if (experiments?.resources) {
+    const rules = rulesFor({ scenario: predatorPrey ? 'predatorPrey' : 'arena', experiments });
+    const life = LIFE[isWolf ? 'wolf' : 'rabbit'];
+    instructions = [
+      `You control one ${isWolf ? 'wolf' : 'rabbit'} in a moving experimental ecosystem. Choose one supplied legal action using only local observations. Survive and reproduce; zero energy or hydration kills. Rest does not refill energy.`,
+      experiments.demographics
+        ? `Reproduction needs eligible opposite-sex adults to meet within 1.7 tiles; gestation ${life.gestation}s, litter up to ${life.litter}, dependent young ${life.dependent}s, maturity ${life.maturity}s. Parents reserve child energy at conception; no solo births.`
+        : isWolf
+          ? `The baseline population-rate model automatically produces solo pups at ${rules.wolfBreedEnergy} energy, costing ${rules.wolfBreedCost}.`
+          : 'The baseline population-rate model automatically produces offspring when a fed mature rabbit is unthreatened.',
+      isWolf
+        ? `Movement costs ${rules.wolfMovementCost} energy per tile, plus ${rules.wolfMetabolism} per second. A catch creates a finite carcass containing 65% of the prey energy. There is no instant meal reward. Stay nearby or scavenge to eat at 8 energy per second. Other wolves can eat the same finite carcass. Attacks cost 0.6 energy and require 0.8s recovery even after failure. Eating cooldown ${rules.wolfEatCooldown}s. Drink at visible shores to maintain hydration.`
+        : `Forage for finite food (${rules.foodEnergy} energy per unit). Patches regrow slowly. Drinking depletes finite nearby water. You pay for movement and metabolism.`,
+      'A burrow protects only its first two occupants; overflow animals remain exposed. Forest cover limits visibility. Drought withers food and dries water; no path crosses water or mountains. Actions continue until replaced. Use supplied legal descriptions. Rabbits may send optional local signals at an energy cost; wolves choose none. These are illustrative simulation units, not calibrated biological predictions. Return no explanation.',
+    ].join(' ');
+  }
+  if (experiments?.decisions) {
+    if (predatorPrey && !isWolf && !experiments.demographics && !experiments.resources)
+      instructions = instructions.replace(
+        'Mating requires BOTH rabbits to choose each other and both to be healthy mature and nearby, and costs energy.',
+        'This predator-prey population-rate preset has automatic solo births for eligible mature unthreatened rabbits; no mutual mating action is required.',
+      );
+    instructions = instructions
+      .replace('Signals are not supported; choose none.', '')
+      .replace('wolves cannot signal.', 'wolves can send local optional signals.')
+      .replace('wolves choose none.', 'wolves can send local optional signals.');
+    instructions +=
+      ' Perception and personal memory update every 0.5 world seconds, independently of API calls. Routes use terrain you have seen. Neighbors energy is a rough 25-point estimate and cargo is presence/absence, not exact inventory. Heard signals can arrive beyond sight; they are fallible reports of the sender location, not commands or shared omniscience. Movement and feeding commitments last up to 2 world seconds unless urgent danger or needs interrupt. Candidate order is randomized independently of biological randomness.';
+    instructions +=
+      experiments.goal === 'lineage'
+        ? ' Objective: sustain your local lineage over time, including viable breeders and dependent young. Consider a locally useful warning, following an informed neighbor, or leaving scarce resources for a needier ally when that improves lineage prospects. You do not know global population state; cooperation is optional and not guaranteed.'
+        : ' Objective: prioritize your own survival and descendants using only your observations.';
+    if (isWolf)
+      instructions +=
+        ' Wolves can signal food for prey or a carcass at their current position, danger for nearby risk, and follow when inviting neighbors along. Follow only when a supplied follow action is useful.';
+  }
+  if (experiments?.communication === false)
+    instructions +=
+      ' Communication is disabled for this experiment. Choose signal none; no messages will be sent or received.';
+  return instructions;
 }
 export async function choose(
   group: ModelGroup,
   observation: ModelObservation,
   signal: AbortSignal,
-  { relief = true, predatorPrey = false }: { relief?: boolean; predatorPrey?: boolean } = {},
+  {
+    relief = true,
+    predatorPrey = false,
+    experiments,
+  }: { relief?: boolean; predatorPrey?: boolean; experiments?: Experiments } = {},
 ): Promise<Result> {
   if (group.controller === 'deterministic')
     throw new ProviderError('Deterministic wolves do not use a model API');
-  const instructions =
-    'wolf' in observation
-      ? predatorPrey
-        ? PREDATOR_PREY_WOLF_INSTRUCTIONS
-        : WOLF_INSTRUCTIONS
-      : relief
-        ? INSTRUCTIONS
-        : PREY_INSTRUCTIONS;
+  const instructions = instructionsFor('wolf' in observation, {
+    relief,
+    predatorPrey,
+    experiments,
+  });
   // "Need food" is offered only to a rabbit that is actually hungry, and only with relief on.
   const hungry =
     relief && 'rabbit' in observation && observation.rabbit.energy < RULES.hungryEnergy;
@@ -91,22 +158,31 @@ export async function choose(
   const { provider, model } = group;
   const choices = Object.fromEntries(observation.choices.map((c) => [c.id, c.description]));
   const signals =
-    'wolf' in observation
-      ? { none: 'Do not signal.' }
-      : {
-          // "none" first: models favor the first option. Each signal says when to use it and why.
-          none: 'Do not signal. The default when nothing below applies.',
-          danger:
-            'Danger: use when a wolf is in sight. Warns nearby allies so they can hide or flee in time.',
-          food: 'Food here: use when you are on a patch with food to spare. Nearby allies can come and eat instead of searching.',
-          follow:
-            'Follow me: use when you are heading to food, water, or safety. Nearby allies can follow you there.',
-          ...(hungry
-            ? {
-                help: 'Need food: your energy is low. Asks nearby rabbits to bring you food; at most once every 6 seconds.',
-              }
-            : {}),
-        };
+    experiments?.communication === false
+      ? { none: 'Communication disabled.' }
+      : 'wolf' in observation
+        ? experiments?.decisions
+          ? {
+              none: 'Do not signal.',
+              food: 'Local prey or carcass here; report your current location.',
+              danger: 'Warn nearby wolves of a local risk.',
+              follow: 'Invite nearby wolves to follow your current movement.',
+            }
+          : { none: 'Do not signal.' }
+        : {
+            // "none" first: models favor the first option. Each signal says when to use it and why.
+            none: 'Do not signal. The default when nothing below applies.',
+            danger:
+              'Danger: use when a wolf is in sight. Warns nearby allies so they can hide or flee in time.',
+            food: 'Food here: use when you are on a patch with food to spare. Nearby allies can come and eat instead of searching.',
+            follow:
+              'Follow me: use when you are heading to food, water, or safety. Nearby allies can follow you there.',
+            ...(hungry
+              ? {
+                  help: 'Need food: your energy is low. Asks nearby rabbits to bring you food; at most once every 6 seconds.',
+                }
+              : {}),
+          };
   const parameters = {
     type: 'object',
     properties: {
@@ -255,7 +331,7 @@ export async function choose(
       raw = data.candidates?.[0]?.content?.parts?.find(
         (p) => p.functionCall?.name === 'choose_action',
       )?.functionCall?.args;
-    decision = validateDecision(raw, observation);
+    decision = validateDecision(raw, observation, Object.keys(signals));
   } catch (error) {
     if (error instanceof ProviderError) {
       error.nativeResponse = nativeResponse;

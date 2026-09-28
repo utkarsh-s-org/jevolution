@@ -266,8 +266,34 @@ export const PREDATOR_PREY_RULES: Rules = {
   // small predator–prey systems collapse (Gause 1934, Huffaker 1958).
   migrationInterval: 20,
 };
-export function rulesFor(world: Pick<World, 'scenario'> | undefined): Rules {
-  return world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
+export function rulesFor(world: Pick<World, 'scenario' | 'experiments'> | undefined): Rules {
+  let base = world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
+  if (world?.experiments?.resources)
+    base = {
+      ...base,
+      wolfMovementCost: 0.18,
+      foodRegrowth: base.foodRegrowth * 0.5,
+      droughtRegrowth: 0.001,
+      droughtWither: 0.08,
+      wolfMealEnergy: 0,
+    };
+  if (!world?.experiments?.demographics) return base;
+  return {
+    ...base,
+    rabbitSoloBirths: 0,
+    wolfSoloPups: 0,
+    maturity: 24,
+    wolfMaturity: 45,
+    lifespan: 480,
+    wolfLifespan: 720,
+    breedEnergy: 60,
+    preyMateDistance: 1.7,
+    wolfPairDistance: 1.7,
+    rabbitCapacity: 0,
+    localCapacity: 12,
+    localCrowdRadius: 4,
+    migrationInterval: 0,
+  };
 }
 export const PREDATOR_PREY_BUDGET: Record<Species, number> = { rabbit: 80, wolf: 20 };
 export const PREDATOR_PREY_GROUPS: ModelGroup[] = [

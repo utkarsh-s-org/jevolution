@@ -18,7 +18,11 @@ export interface RuntimeServices {
     group: ModelGroup,
     observation: ModelObservation,
     signal: AbortSignal,
-    options: { relief: boolean; predatorPrey: boolean },
+    options: {
+      relief: boolean;
+      predatorPrey: boolean;
+      experiments?: import('./experiments.js').Experiments;
+    },
   ): Promise<Result>;
   createReplay(runId: string): RuntimeReplay;
   record(runId: string, event: Record<string, unknown>): void;

@@ -65,6 +65,10 @@ export function visible(world: World, a: Point, b: Point, radius: number): boole
 export function findRoute(world: World, from: Point, to: Point): Point[] {
   if (!walkable(world, to)) return [];
   const a = cell(from);
+  const known =
+    world.experiments?.decisions && 'knownTiles' in from
+      ? new Set((from as Rabbit | Wolf).knownTiles ?? [])
+      : undefined;
   const b = cell(to);
   const start = a.y * GRID + a.x;
   const end = b.y * GRID + b.x;
@@ -90,6 +94,7 @@ export function findRoute(world: World, from: Point, to: Point): Point[] {
       const p = { x: x + dx, y: y + dy };
       if (!walkable(world, p)) continue;
       const key = p.y * GRID + p.x;
+      if (known && !known.has(key)) continue;
       if (parent[key] !== -1) continue;
       parent[key] = at;
       queue.push(key);
