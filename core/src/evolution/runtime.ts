@@ -1,9 +1,9 @@
 import {
-  DEFAULT_CONFIG,
   DEFAULT_SEED,
   PREDATOR_PREY_GROUPS,
   RULES,
   rulesFor,
+  SCENARIO_CONFIG,
   validateGroups,
 } from './constants.js';
 import { canReconsider } from './decisionDynamics.js';
@@ -39,7 +39,7 @@ interface Pending {
 }
 export class SimulationRuntime {
   world: ReturnType<typeof createWorld>;
-  config: RunConfig = { ...DEFAULT_CONFIG };
+  config: RunConfig = { ...SCENARIO_CONFIG.predatorPrey };
   running = false;
   reason = 'Add your API keys, then start the ecosystem.';
   runId: string;
@@ -73,7 +73,11 @@ export class SimulationRuntime {
   private services: RuntimeServices;
   constructor(services: RuntimeServices) {
     this.services = services;
-    this.world = createWorld(DEFAULT_SEED, services.defaultGroups());
+    this.world = createWorld(
+      DEFAULT_SEED,
+      PREDATOR_PREY_GROUPS.map((g) => ({ ...g, model: services.jevModel?.() || g.model })),
+      this.config.scenario,
+    );
     this.runId = services.id();
     this.replay = services.createReplay(this.runId);
     this.failures = this.zeros();
