@@ -6,6 +6,7 @@ import {
   rulesFor,
   validateGroups,
 } from './constants.js';
+import { canReconsider } from './decisionDynamics.js';
 import { DecisionJournal } from './decisions.js';
 import { configureExperiments, dependent } from './demographics.js';
 import { validateExperimentPreview } from './experimentPreview.js';
@@ -116,7 +117,8 @@ export class SimulationRuntime {
     for (const item of this.active.values()) inFlight[item.lineage]++;
     const backlog = this.zeros();
     for (const r of this.actors())
-      if (!r.pending && (r.nextDecision ?? 0) <= this.world.time) backlog[r.lineage!]++;
+      if (!r.pending && (r.nextDecision ?? 0) <= this.world.time && canReconsider(this.world, r))
+        backlog[r.lineage!]++;
     return {
       running: this.running,
       providerReady: this.services.providerReadiness(),
@@ -332,7 +334,11 @@ export class SimulationRuntime {
       let slots = this.config.maxInFlight - status.inFlight[lineage];
       const due = this.actors()
         .filter(
-          (r) => r.lineage === lineage && !r.pending && (r.nextDecision ?? 0) <= this.world.time,
+          (r) =>
+            r.lineage === lineage &&
+            !r.pending &&
+            (r.nextDecision ?? 0) <= this.world.time &&
+            canReconsider(this.world, r),
         )
         .sort((a, b) => (a.nextDecision ?? 0) - (b.nextDecision ?? 0) || a.id - b.id);
       for (const rabbit of due) {
@@ -354,7 +360,15 @@ export class SimulationRuntime {
     const controller = new AbortController();
     rabbit.pending = true;
     this.active.set(id, { lineage, controller, animal: rabbit });
-    const queueMs = Math.max(0, (world.time - (rabbit.nextDecision ?? 0)) * 1000);
+    const queueMs = Math.max(
+      0,
+      (world.time -
+        Math.max(
+          rabbit.nextDecision ?? 0,
+          world.experiments?.decisions ? (rabbit.committedUntil ?? 0) : 0,
+        )) *
+        1000,
+    );
     const observation = 'genes' in rabbit ? observe(world, rabbit) : observeWolf(world, rabbit);
     const started = performance.now();
     stats.requested++;

@@ -74,6 +74,8 @@ export interface LifeHistory {
   pregnancy?: { due: number; father: number; generation: number; fatherGenes?: Genes };
 }
 export interface Rabbit extends Point {
+  committedUntil?: number;
+  knownTiles?: number[];
   shelterKey?: string;
   shelterArrival?: number;
   life?: LifeHistory;
@@ -108,8 +110,11 @@ export interface Rabbit extends Point {
   helpRequestedAt?: number;
   nextHelpSignal: number;
 }
-export type WolfAction = 'rest' | 'hunt' | 'explore' | 'mate' | 'drink' | 'scavenge';
+export type WolfAction = 'rest' | 'hunt' | 'explore' | 'mate' | 'drink' | 'scavenge' | 'follow';
 export interface Wolf extends Point {
+  committedUntil?: number;
+  knownTiles?: number[];
+  followId?: number;
   water?: number;
   nextAttack?: number;
   carcassId?: number;
@@ -136,6 +141,7 @@ export interface Wolf extends Point {
   target?: number;
 }
 export interface LocalSignal extends Point {
+  messageId?: string;
   sender: number;
   lineage: Lineage;
   kind: Signal;
@@ -191,6 +197,8 @@ export interface Candidate {
 export interface Observation {
   caches: FoodCache[];
   rabbit: {
+    sex?: 'female' | 'male';
+    pregnancyDue?: number;
     id: number;
     age: number;
     generation: number;
@@ -213,11 +221,12 @@ export interface Observation {
     moving: boolean;
     heading: Point | null;
   }[];
-  signals: { sender: number; kind: Signal; position: Point; age: number }[];
+  signals: { id?: string; sender: number; kind: Signal; position: Point; age: number }[];
   memory: (Omit<Memory, 'observedAt' | 'wolfId'> & { age: number })[];
   choices: Candidate[];
 }
 export interface WolfCandidate {
+  followId?: number;
   carcassId?: number;
   id: string;
   action: WolfAction;
@@ -227,7 +236,10 @@ export interface WolfCandidate {
   mateId?: number;
 }
 export interface WolfObservation {
+  signals?: { id?: string; sender: number; kind: Signal; position: Point; age: number }[];
   wolf: {
+    sex?: 'female' | 'male';
+    pregnancyDue?: number;
     water?: number;
     id: number;
     position: Point;
@@ -249,7 +261,7 @@ export interface WolfObservation {
     action: WolfAction;
     ally: boolean;
     mateId?: number;
-    readyToMate: boolean;
+    readyToMate?: boolean;
   }[];
   choices: WolfCandidate[];
 }
@@ -335,6 +347,7 @@ export interface WorldEvent {
   lineage?: Lineage;
 }
 export interface World {
+  nextPerception?: number;
   carcasses?: (Point & { id: number; energy: number; createdAt: number })[];
   experiments?: import('./experiments.js').Experiments;
   mechanisms?: Record<string, number>;

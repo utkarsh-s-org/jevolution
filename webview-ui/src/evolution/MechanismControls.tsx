@@ -34,6 +34,32 @@ export function MechanismControls({
         and water
       </label>
       <label>
+        <input
+          type="checkbox"
+          checked={settings.decisions}
+          onChange={(e) => onChange({ ...settings, decisions: e.target.checked })}
+        />{' '}
+        #4 Decisions: local perception, persistent actions and communication
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={settings.communication}
+          onChange={(e) => onChange({ ...settings, communication: e.target.checked })}
+        />{' '}
+        Allow local signals
+      </label>
+      <label>
+        Objective with decision experiment{' '}
+        <select
+          value={settings.goal}
+          onChange={(e) => onChange({ ...settings, goal: e.target.value as Experiments['goal'] })}
+        >
+          <option value="lineage">Sustain the local lineage</option>
+          <option value="individual">Individual survival and descendants</option>
+        </select>
+      </label>
+      <label>
         Immigration with demographics enabled{' '}
         <select
           value={settings.immigration}

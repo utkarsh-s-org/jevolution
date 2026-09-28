@@ -1,4 +1,5 @@
 import { rulesFor } from './constants.js';
+import { emitWolfSignal, heardSignals, permuteChoices } from './decisionDynamics.js';
 import { compatible, conceive } from './demographics.js';
 import { protectedRabbit, waterSource, wolfNeedsDrink } from './habitat.js';
 import type {
@@ -206,6 +207,24 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
     .filter((r) => wolfSeesPrey(world, wolf, r))
     .sort((a, b) => distance(wolf, a) - distance(wolf, b) || a.id - b.id);
   const choices: WolfCandidate[] = [];
+  const signals = heardSignals(world, wolf);
+  if (world.experiments?.decisions)
+    for (const leader of world.wolves
+      .filter(
+        (other) =>
+          other.id !== wolf.id &&
+          other.lineage === wolf.lineage &&
+          visible(world, wolf, other, RULES.wolfSight) &&
+          signals.some((s) => s.sender === other.id && s.kind === 'follow'),
+      )
+      .slice(0, 2))
+      choices.push({
+        id: `follow_${leader.id}`,
+        action: 'follow',
+        followId: leader.id,
+        target: center(leader),
+        description: `Follow visible wolf ${leader.id}, which signalled follow. This is optional; tracking stops out of sight.`,
+      });
   if (world.experiments?.resources) {
     for (const carcass of (world.carcasses ?? [])
       .filter((c) => c.energy > 0.1 && visible(world, wolf, c, RULES.wolfSight))
@@ -301,7 +320,11 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
       : 'Stop and wait. Eating cooldown continues to expire.',
   });
   return {
+    ...(world.experiments?.decisions ? { signals } : {}),
     wolf: {
+      ...(world.experiments?.decisions && wolf.life
+        ? { sex: wolf.life.sex, pregnancyDue: wolf.life.pregnancy?.due }
+        : {}),
       ...(world.experiments?.resources ? { water: wolf.water ?? 80 } : {}),
       id: wolf.id,
       lifeCycle: dynamicWolf(world, wolf) ? 'dynamic' : 'fixed',
@@ -325,9 +348,9 @@ export function observeWolf(world: World, wolf: Wolf): WolfObservation {
         action: w.action || 'rest',
         ally: w.lineage === wolf.lineage,
         mateId: w.mateId,
-        readyToMate: wolfReadyToMate(world, w),
+        ...(world.experiments?.decisions ? {} : { readyToMate: wolfReadyToMate(world, w) }),
       })),
-    choices,
+    choices: permuteChoices(world, wolf, choices),
   };
 }
 export function applyWolfDecision(
@@ -343,8 +366,19 @@ export function applyWolfDecision(
   };
   const RULES = rulesFor(world);
   const choice = choices.find((c) => c.id === decision.choice);
-  if (!choice || decision.signal !== 'none') return reject('choice-or-signal-invalid');
+  const supported =
+    world.experiments?.decisions && world.experiments.communication !== false
+      ? ['none', 'food', 'danger', 'follow']
+      : ['none'];
+  if (!choice || !supported.includes(decision.signal)) return reject('choice-or-signal-invalid');
   let target: Point | undefined = choice.target;
+  if (choice.action === 'follow') {
+    const leader = world.wolves.find(
+      (w) => w.id === choice.followId && visible(world, wolf, w, RULES.wolfSight),
+    );
+    if (!leader) return reject('leader-no-longer-visible');
+    target = leader;
+  }
   if (
     choice.action === 'scavenge' &&
     !(world.carcasses ?? []).some((c) => c.id === choice.carcassId && c.energy > 0.1)
@@ -369,6 +403,9 @@ export function applyWolfDecision(
   const route = target ? findRoute(world, wolf, target) : [];
   if (target && distance(wolf, target) > 0.8 && !route.length) return reject('route-unavailable');
   wolf.action = choice.action;
+  wolf.followId = choice.followId;
+  if (world.experiments?.decisions) wolf.committedUntil = world.time + 2;
+  emitWolfSignal(world, wolf, decision.signal);
   if (choice.carcassId !== undefined || choice.action !== 'rest') wolf.carcassId = choice.carcassId;
   wolf.target = choice.preyId;
   wolf.mateId = choice.mateId;

@@ -1,4 +1,5 @@
 import { GENE_NAMES, GRID, RULES as BASE_RULES, type Rules, rulesFor } from './constants.js';
+import { heardSignals, permuteChoices } from './decisionDynamics.js';
 import {
   boundaryMigration,
   careAndDisperse,
@@ -154,6 +155,28 @@ function remember(world: World, r: Rabbit, tiles: Tile[], wolves: Wolf[]) {
       .slice(0, RULES.memoryLimit[kind]),
   );
 }
+export function senseWorld(world: World) {
+  if (!world.experiments?.decisions || world.time < (world.nextPerception ?? 0)) return;
+  world.nextPerception = world.time + 0.5;
+  for (const r of world.rabbits) {
+    const tiles = nearbyTiles(world, r);
+    r.knownTiles = [...new Set([...(r.knownTiles ?? []), ...tiles.map((t) => t.y * GRID + t.x)])];
+    remember(
+      world,
+      r,
+      tiles,
+      world.wolves.filter((w) => visible(world, r, w, vision(r))),
+    );
+  }
+  for (const w of world.wolves) {
+    const seen = world.tiles.filter(
+      (t) =>
+        distance(t, w) <= rulesFor(world).wolfSight &&
+        visible(world, w, center(t), rulesFor(world).wolfSight),
+    );
+    w.knownTiles = [...new Set([...(w.knownTiles ?? []), ...seen.map((t) => t.y * GRID + t.x)])];
+  }
+}
 export function observe(world: World, r: Rabbit): Observation {
   const RULES = rulesFor(world);
   const radius = vision(r);
@@ -161,7 +184,7 @@ export function observe(world: World, r: Rabbit): Observation {
   const wolves = seenWolves.map((w) => ({ x: w.x, y: w.y }));
   const neighbors = world.rabbits.filter((a) => a.id !== r.id && visible(world, r, a, radius));
   const tiles = nearbyTiles(world, r);
-  remember(world, r, tiles, seenWolves);
+  if (!world.experiments?.decisions) remember(world, r, tiles, seenWolves);
   const choices: Candidate[] = [
     {
       id: 'rest',
@@ -190,7 +213,7 @@ export function observe(world: World, r: Rabbit): Observation {
     });
   };
   // Listed first after rest: offspring are how a lineage grows.
-  if (mature(r, RULES)) {
+  if (mature(r, RULES) && (!world.experiments?.decisions || !RULES.rabbitSoloBirths)) {
     const mates = neighbors
       .filter((a) => a.lineage === r.lineage && mature(a, RULES) && compatible(world, r, a))
       .sort((a, b) => distance(r, a) - distance(r, b))
@@ -258,20 +281,7 @@ export function observe(world: World, r: Rabbit): Observation {
         `Move ${direction}. ${wolves.length ? `Closest visible wolf to destination: ${Math.min(...wolves.map((w) => distance(w, target))).toFixed(1)} tiles.` : 'Find new food, water, or mates beyond current visibility.'}`,
       );
   }
-  const signals = world.signals
-    .filter(
-      (s) =>
-        s.delivered <= world.time &&
-        s.expires > world.time &&
-        s.sender !== r.id &&
-        visible(world, r, s, s.range),
-    )
-    .map((s) => ({
-      sender: s.sender,
-      kind: s.kind,
-      position: { x: s.x, y: s.y },
-      age: world.time - s.delivered,
-    }));
+  const signals = heardSignals(world, r);
   const leaders = neighbors
     .filter((n) => n.path.length || signals.some((s) => s.sender === n.id && s.kind === 'follow'))
     .sort((a, b) => distance(r, a) - distance(r, b))
@@ -288,6 +298,9 @@ export function observe(world: World, r: Rabbit): Observation {
   return {
     caches: world.caches.filter((c) => visible(world, r, c, radius)),
     rabbit: {
+      ...(world.experiments?.decisions && r.life
+        ? { sex: r.life.sex, pregnancyDue: r.life.pregnancy?.due }
+        : {}),
       id: r.id,
       age: r.age,
       generation: r.generation,
@@ -308,9 +321,9 @@ export function observe(world: World, r: Rabbit): Observation {
       id: n.id,
       ally: n.lineage === r.lineage,
       position: { x: n.x, y: n.y },
-      energy: n.energy,
-      cargo: n.cargo,
-      needsFood: n.energy < RULES.hungryEnergy,
+      energy: world.experiments?.decisions ? Math.round(n.energy / 25) * 25 : n.energy,
+      cargo: world.experiments?.decisions ? (n.cargo > 0 ? 1 : 0) : n.cargo,
+      needsFood: world.experiments?.decisions ? n.energy < 25 : n.energy < RULES.hungryEnergy,
       action: n.action,
       moving: n.path.length > 0,
       heading: n.path.length
@@ -324,7 +337,7 @@ export function observe(world: World, r: Rabbit): Observation {
       age: world.time - observedAt,
       ...(food === undefined ? {} : { food }),
     })),
-    choices,
+    choices: permuteChoices(world, r, choices),
   };
 }
 export function applyDecision(
@@ -340,6 +353,8 @@ export function applyDecision(
   };
   const RULES = rulesFor(world);
   const chosen = choices.find((c) => c.id === decision.choice);
+  if (world.experiments?.communication === false && decision.signal !== 'none')
+    return reject('communication-disabled');
   if (!chosen || !['none', 'danger', 'food', 'follow', 'help'].includes(decision.signal))
     return reject('choice-or-signal-invalid');
   if (
@@ -380,6 +395,7 @@ export function applyDecision(
     }
   }
   r.action = chosen.action;
+  if (world.experiments?.decisions) r.committedUntil = world.time + 2;
   r.target = chosen.target;
   r.path = route;
   r.mateId = chosen.mateId;
@@ -408,6 +424,7 @@ export function applyDecision(
     r.lastSignal = decision.signal;
     r.signalUntil = world.time + RULES.signalLife;
     world.signals.push({
+      ...(world.experiments?.decisions ? { messageId: `${r.id}:${world.time.toFixed(6)}` } : {}),
       x: r.x,
       y: r.y,
       sender: r.id,
@@ -526,6 +543,7 @@ export function stepWorld(world: World, dt: number) {
   const RULES = rulesFor(world);
   world.time += dt;
   advanceHabitat(world, dt);
+  senseWorld(world);
   const drought = world.time < world.droughtUntil;
   for (const t of world.tiles)
     if (t.kind === 'grass' || t.kind === 'forest') {
@@ -636,7 +654,12 @@ export function stepWorld(world: World, dt: number) {
     else if (r.water <= 0) kill(world, r, 'dehydration');
     else if (r.age > (r.life?.deathAge ?? RULES.lifespan)) kill(world, r, 'oldAge');
   }
-  for (const w of [...world.wolves]) {
+  const wolfOrder = [...world.wolves];
+  const wolfOffset =
+    world.experiments?.decisions && wolfOrder.length
+      ? Math.floor(world.time * 20) % wolfOrder.length
+      : 0;
+  for (const w of [...wolfOrder.slice(wolfOffset), ...wolfOrder.slice(0, wolfOffset)]) {
     ageWolf(world, w, dt);
     careAndDisperse(world, w, dt);
     let caught = false;
@@ -655,7 +678,18 @@ export function stepWorld(world: World, dt: number) {
           w.target = undefined;
         }
       }
-      if (w.action === 'mate') {
+      if (w.action === 'follow') {
+        const leader = world.wolves.find(
+          (other) => other.id === w.followId && visible(world, w, other, RULES.wolfSight),
+        );
+        if (leader) w.path = distance(w, leader) > 1.5 ? findRoute(world, w, leader) : [];
+        else {
+          w.action = 'rest';
+          w.path = [];
+          w.followId = undefined;
+        }
+        replanned = true;
+      } else if (w.action === 'mate') {
         const mate = wolfMate(world, w, w.mateId);
         const route =
           mate && distance(w, mate) >= RULES.mateDistance ? findRoute(world, w, mate) : [];

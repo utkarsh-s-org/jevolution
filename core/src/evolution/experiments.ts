@@ -5,6 +5,7 @@ export interface Experiments {
   decisions: boolean;
   researchClock: boolean;
   communication: boolean;
+  goal: 'individual' | 'lineage';
   immigration: 'closed' | 'boundary';
 }
 export const BASELINE_EXPERIMENTS: Experiments = {
@@ -14,6 +15,7 @@ export const BASELINE_EXPERIMENTS: Experiments = {
   researchClock: false,
   communication: true,
   immigration: 'closed',
+  goal: 'lineage',
 };
 export function validateExperiments(input: unknown): Experiments {
   if (input === undefined) return { ...BASELINE_EXPERIMENTS };
@@ -22,7 +24,10 @@ export function validateExperiments(input: unknown): Experiments {
   const result = { ...BASELINE_EXPERIMENTS };
   for (const [key, value] of Object.entries(input)) {
     if (!(key in result)) throw new Error(`Unknown mechanism: ${key}`);
-    if (key === 'immigration') {
+    if (key === 'goal') {
+      if (value !== 'individual' && value !== 'lineage') throw new Error('Invalid objective');
+      result.goal = value;
+    } else if (key === 'immigration') {
       if (value !== 'closed' && value !== 'boundary') throw new Error('Invalid immigration mode.');
       result.immigration = value;
     } else {
