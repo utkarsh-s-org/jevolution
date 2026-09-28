@@ -23,6 +23,7 @@ Use Node.js **22.12 or newer** and npm.
 git clone https://github.com/utkarshg20-org/jevolution.git
 cd jevolution
 npm install
+# Configure .env.accounts.local as described in docs/account-access.md
 npm run arena:dev:api
 ```
 
@@ -32,11 +33,15 @@ In a second terminal:
 npm run arena:dev
 ```
 
-Open **[http://127.0.0.1:5174/arena.html](http://127.0.0.1:5174/arena.html)**. Click **API keys** to enter your provider credentials. Use the gear to configure groups, environment, and timing, then reset the habitat to apply settings. Starting a run makes billable API calls on your accounts. Set request and duration limits before starting. Switching away from the tab pauses the simulation.
+Open **[http://127.0.0.1:5174/arena.html](http://127.0.0.1:5174/arena.html)**. Choose **Explore a sample** for a free interactive recording, or create an account and click **API keys** to save your provider credentials to your account. Use the gear to configure groups, environment, and timing, then reset the habitat to apply settings. Starting a run makes billable API calls on your accounts. Set request and duration limits before starting. Switching away from the tab pauses the simulation.
 
-Keys are saved in this browser's localStorage, separately from run data. Export the current run before resetting or reloading. Stop the development servers with **Ctrl+C**.
+Without account keys, the app opens a labeled, read-only sample with playback, rewind, animal inspection and analytics. Editing and live execution unlock when a personal key is saved. Provider-reported credit failures pause the live run and return to the sample.
 
-The legacy loopback server (`npm run arena:build` followed by `npm run arena`) supports private development with a Git-ignored `.env.arena`. Do not expose that server publicly; the public deployment uses the isolated BYOK endpoint instead.
+Keys are encrypted server-side and never included in run exports. Started runs save to your Supabase account; **Previous runs** opens recorded habitats and analytics without model calls. Pause and wait for **Saved to your account** before leaving. Stop the development servers with **Ctrl+C**.
+
+See [account setup and storage](docs/account-access.md) for Supabase configuration, migrations, local development and current sponsored-access status.
+
+The legacy loopback server (`npm run arena:build` followed by `npm run arena`) supports private development with a Git-ignored `.env.arena`. Do not expose that server publicly; the public deployment requires an authenticated account and uses its encrypted provider keys.
 
 ## What the comparison measures
 
@@ -102,10 +107,12 @@ Open http://127.0.0.1:5174/arena.html. The existing local server command above r
 
 All experiment controls apply when resetting the habitat and are included in exported configuration. Legacy records marked preview-only retain their original, unapplied meaning.
 
+Opening settings does not activate experiment overrides. Untouched controls and changes to timing alone preserve the selected scenario's rules, starting populations, seeded food, and random sequence. Experiment defaults use that scenario's wolf vision and configured starting roster. Switching scenarios resets experiment overrides to the new preset.
+
 - Communication: sociability scales the selected maximum range from 37.5% to 100%. Delay is simulation milliseconds; message loss is a seeded draw per emission. Cost is the selected base times (1 + sociability). Lost messages still cost energy. Signal lifetime begins at delivery.
 - Resources: abundance scales capacity and initial food. Clustering blends uniform supply with generated patches, preserving total capacity. Regrowth scales replenishment independently.
 - Temperature: an illustrative model with a 20 C reference. Each degree colder increases base rabbit and wolf metabolism 2%; each degree hotter increases rabbit thirst 4%. Food growth decreases 2.5% per degree away from 20 C, floored at 10%. These are experiment assumptions, not validated animal physiology.
-- Drought: regular 60-second events at the selected frequency per simulation hour. A seeded center selects the nearest tiles covering the requested fraction. Severity reduces local regrowth and scales withering. Automatic droughts are disabled at zero frequency; manual drought uses the same severity and area.
+- Drought: regular 60-second events at the selected frequency per simulation hour. Partial coverage uses a seeded center; full coverage preserves the original global drought. Strength is relative to the scenario: 100% keeps its drought regrowth and withering, 0% removes the growth reduction and withering, and 200% stops regrowth and doubles withering. Intermediate strengths interpolate between these values. Food-regrowth and temperature multipliers apply afterward. Automatic droughts are disabled at zero frequency; manual drought uses the same strength and area.
 - Predators: starting count is divided among configured wolf groups (0 to 20), overriding their starting counts. Speed scales the scenario baseline; vision is in tiles. Population may subsequently change through births, deaths, and scenario immigration.
 - Inheritance: mutation probability applies separately to each trait. Starting diversity rescales founder traits around 0.5, with the existing 0.05 to 0.95 bounds. Model weights stay fixed.
 

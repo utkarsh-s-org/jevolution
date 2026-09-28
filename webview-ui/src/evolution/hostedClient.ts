@@ -1,5 +1,4 @@
 import type { Snapshot } from '../../../core/src/evolution/types.js';
-import { readDeviceKeys } from './deviceKeys.js';
 
 export const HOSTED = import.meta.env.VITE_ARENA_HOSTED === 'true';
 class HostedClient {
@@ -12,12 +11,44 @@ class HostedClient {
   private sequence = 0;
   snapshot: Snapshot | null = null;
   authenticated = false;
+  archived = false;
+  sample = false;
+  samplePlaying = false;
+  sampleIndex = 0;
+  sampleReason = '';
+  sampleError = '';
+  sampleLoading = false;
+  saveState = '';
+  private visibility = () => {
+    if (document.hidden && (this.snapshot?.status.running || this.samplePlaying))
+      void this.request('pause', {
+        reason: 'Tab hidden. Paused to stop unattended model calls.',
+      }).catch(() => {});
+  };
+  private leaving = (event: BeforeUnloadEvent) => {
+    if (
+      this.snapshot?.status.running ||
+      this.saveState.startsWith('Saving') ||
+      this.saveState.startsWith('Not saved')
+    ) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  };
   constructor() {
     this.worker.onmessage = (event) => {
       const message = event.data;
       if (message.type === 'snapshot') {
         this.snapshot = message.snapshot;
         this.authenticated = message.authenticated;
+        this.archived = message.archived;
+        this.sample = message.sample;
+        this.samplePlaying = message.samplePlaying;
+        this.sampleIndex = message.sampleIndex;
+        this.sampleReason = message.sampleReason;
+        this.sampleError = message.sampleError;
+        this.sampleLoading = message.sampleLoading;
+        this.saveState = message.saveState;
         for (const listener of this.listeners) listener(message.snapshot);
       } else {
         const pending = this.pending.get(message.id);
@@ -32,16 +63,8 @@ class HostedClient {
       this.pending.clear();
     };
     void this.request('refresh').catch(() => {});
-    window.addEventListener('storage', (event) => {
-      if (event.key === 'jevolution.provider-keys.v1' || event.key === null)
-        void this.request('refresh').catch(() => {});
-    });
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.snapshot?.status.running)
-        void this.request('pause', {
-          reason: 'Tab hidden. Paused to stop unattended model calls.',
-        });
-    });
+    document.addEventListener('visibilitychange', this.visibility);
+    window.addEventListener('beforeunload', this.leaving);
   }
   request<T = Snapshot>(action: string, data?: unknown): Promise<T> {
     const id = ++this.sequence;
@@ -50,9 +73,17 @@ class HostedClient {
       this.worker.postMessage({
         id,
         action,
-        data: action === 'refresh' ? { keys: readDeviceKeys() } : data,
+        data,
       });
     });
+  }
+  destroy() {
+    document.removeEventListener('visibilitychange', this.visibility);
+    window.removeEventListener('beforeunload', this.leaving);
+    this.worker.terminate();
+    this.listeners.clear();
+    for (const pending of this.pending.values()) pending.reject(new Error('Signed out.'));
+    this.pending.clear();
   }
   subscribe(listener: (snapshot: Snapshot) => void) {
     this.listeners.add(listener);
@@ -65,6 +96,11 @@ class HostedClient {
 let client: HostedClient | undefined;
 export function hostedClient() {
   return (client ??= new HostedClient());
+}
+
+export function closeHostedClient() {
+  client?.destroy();
+  client = undefined;
 }
 
 export async function arenaRequest<T = Snapshot>(path: string, data?: unknown): Promise<T> {

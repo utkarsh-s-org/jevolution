@@ -1,12 +1,32 @@
 import { DEFAULT_GROUPS } from '../../core/src/evolution/constants.js';
+import {
+  accountFailure,
+  requireAccount,
+  storeJson,
+} from '../../server/src/evolution/accountStore.js';
 import { json } from '../../server/src/evolution/hostedAuth.js';
 export default {
   async fetch(request: Request) {
-    if (request.method !== 'GET') return json({ error: 'Use device-saved API keys.' }, 405);
-    return json({
-      groups: DEFAULT_GROUPS,
-      ready: { typesafe: false, anthropic: false, openai: false, google: false },
-      byok: true,
-    });
+    try {
+      if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+      const user = await requireAccount(request);
+      const keys = await storeJson<{ provider: string }[]>(
+        'jevolution_provider_keys?select=provider',
+        user,
+      );
+      return json({
+        user: { id: user.id, email: user.email },
+        groups: DEFAULT_GROUPS,
+        ready: Object.fromEntries(
+          ['typesafe', 'anthropic', 'openai', 'google'].map((provider) => [
+            provider,
+            (keys || []).some((key: { provider: string }) => key.provider === provider),
+          ]),
+        ),
+        byok: true,
+      });
+    } catch (error) {
+      return accountFailure(error);
+    }
   },
 };

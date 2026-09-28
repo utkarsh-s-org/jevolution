@@ -9,7 +9,6 @@ import {
   PROVIDER_KEYS,
   SCENARIO_CONFIG,
 } from '../../../core/src/evolution/constants.js';
-import { defaultExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
 import type {
   Lineage,
   ModelGroup,
@@ -28,6 +27,7 @@ import { MapEditor } from './MapEditor.js';
 import { ModelSettings } from './ModelSettings.js';
 import { OrganismInspector } from './OrganismInspector.js';
 import { PopulationChart } from './PopulationChart.js';
+import { PreviousRuns } from './PreviousRuns.js';
 import { RabbitDistributions } from './RabbitDistributions.js';
 import { ReliefPanel } from './ReliefPanel.js';
 import { attachRenderer } from './renderer.js';
@@ -42,7 +42,10 @@ const time = (seconds: number) =>
     .padStart(2, '0')}:${Math.floor(seconds % 60)
     .toString()
     .padStart(2, '0')}`;
-export default function App() {
+export default function App({
+  onLogout,
+  onSignIn,
+}: { onLogout?: () => void; onSignIn?: () => void } = {}) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [showAccess, setShowAccess] = useState(false);
   const replay = useReplay(snapshot);
@@ -73,8 +76,18 @@ export default function App() {
       previousFocus?.focus({ preventScroll: true });
     };
   }, [showSettings]);
-  const [view, setView] = useState<'habitat' | 'analytics' | 'notes' | 'guide'>('habitat');
+  const [view, setView] = useState<'habitat' | 'analytics' | 'notes' | 'guide' | 'runs'>('habitat');
   const navigate = (next: typeof view) => {
+    if (HOSTED && next === 'runs') {
+      void hostedClient()
+        .request('pause')
+        .then(() => {
+          setView(next);
+          window.scrollTo({ top: 0 });
+        })
+        .catch((error) => setError(error.message));
+      return;
+    }
     setView(next);
     window.scrollTo({ top: 0 });
   };
@@ -113,6 +126,7 @@ export default function App() {
     if (HOSTED)
       return hostedClient().subscribe((next) => {
         setSnapshot(next);
+        if (hostedClient().sample) setShowSettings(false);
         setConnected(true);
       });
     const events = new EventSource('/api/arena/events');
@@ -152,6 +166,10 @@ export default function App() {
     return () => instance.dispose();
   }, []);
   async function control(action: string) {
+    if (HOSTED && (hostedClient().archived || hostedClient().sample)) {
+      setError('Saved runs are read-only. Return to your current habitat first.');
+      return;
+    }
     if (HOSTED && action === 'start' && !hostedClient().authenticated) {
       setShowAccess(true);
       return;
@@ -178,6 +196,18 @@ export default function App() {
   const world = replay.shown?.world;
   const status = replay.shown?.status;
   const liveStatus = snapshot?.status;
+  const viewingSample = HOSTED && hostedClient().sample;
+  const readOnly = HOSTED && (hostedClient().archived || hostedClient().sample);
+  const openKeys = () => {
+    if (onSignIn) onSignIn();
+    else setShowAccess(true);
+  };
+  const sampleCommand = (action: string) => {
+    void hostedClient()
+      .request(action)
+      .catch((e: Error) => setError(e.message));
+  };
+  const viewingSaved = HOSTED && hostedClient().archived;
   const groups = world?.groups || DEFAULT_GROUPS;
   const color = (id: string) => ARENA_GROUP_COLORS[groups.find((g) => g.id === id)?.color || 0];
   const count = (l: Lineage) => {
@@ -294,35 +324,38 @@ export default function App() {
           <button
             className="primary-button"
             disabled={
+              viewingSaved ||
+              (viewingSample && hostedClient().sampleLoading) ||
               editor.open ||
               busy ||
               !connected ||
               (!HOSTED && !liveStatus?.running && !!missingKeys)
             }
-            onClick={() => void control(liveStatus?.running ? 'pause' : 'start')}
+            onClick={() =>
+              viewingSample
+                ? sampleCommand(hostedClient().samplePlaying ? 'samplePause' : 'samplePlay')
+                : void control(liveStatus?.running ? 'pause' : 'start')
+            }
           >
-            {liveStatus?.running
-              ? 'Ⅱ Pause ecosystem'
-              : replay.reviewing
-                ? '▶ Resume latest state'
-                : '▶ Start ecosystem'}
+            {viewingSample
+              ? hostedClient().samplePlaying
+                ? 'Ⅱ Pause sample'
+                : '▶ Play sample'
+              : viewingSaved
+                ? 'Saved replay'
+                : liveStatus?.running
+                  ? 'Ⅱ Pause ecosystem'
+                  : replay.reviewing
+                    ? '▶ Resume latest state'
+                    : '▶ Start ecosystem'}
           </button>
           <button
             className="icon-button"
             title="Run settings and reset"
             aria-label="Open run settings"
-            disabled={editor.open}
+            disabled={!connected || editor.open || readOnly}
             onClick={() => {
-              setConfig({
-                ...(liveStatus?.config || DEFAULT_CONFIG),
-                experimentPreview: liveStatus?.config.experimentPreview ?? {
-                  ...defaultExperimentPreview(),
-                  values: {
-                    ...defaultExperimentPreview().values,
-                    wolfCount: snapshot?.world.wolves.length ?? 10,
-                  },
-                },
-              });
+              setConfig({ ...(liveStatus?.config || DEFAULT_CONFIG) });
               setSeed(snapshot?.world.seed || DEFAULT_SEED);
               setGroupsDraft(snapshot?.world.groups || DEFAULT_GROUPS);
               setShowSettings(true);
@@ -342,7 +375,12 @@ export default function App() {
                   : 'Edit map'
             }
             disabled={
-              busy || !connected || !!liveStatus?.running || replay.reviewing || editor.open
+              readOnly ||
+              busy ||
+              !connected ||
+              !!liveStatus?.running ||
+              replay.reviewing ||
+              editor.open
             }
             onClick={() => {
               selectAnimal(null);
@@ -366,7 +404,7 @@ export default function App() {
           <button
             className="secondary-button session-button"
             disabled={busy || !connected}
-            onClick={() => setShowAccess(true)}
+            onClick={openKeys}
           >
             API keys
           </button>
@@ -408,7 +446,13 @@ export default function App() {
   const timeline = (
     <div className="replay-controls" aria-label="Replay controls">
       <div className="replay-heading">
-        <span>{replay.reviewing ? `REPLAY · ${world?.time.toFixed(2)}s` : 'RUN TIMELINE'}</span>
+        <span>
+          {viewingSample
+            ? `SAMPLE · ${world?.time.toFixed(1)}s`
+            : replay.reviewing
+              ? `REPLAY · ${world?.time.toFixed(2)}s`
+              : 'RUN TIMELINE'}
+        </span>
         <small>
           {liveStatus?.running
             ? 'Pause to rewind'
@@ -428,12 +472,23 @@ export default function App() {
         onChange={(e) => replay.seek(Number(e.target.value))}
       />
       <div className="replay-buttons">
+        {viewingSample && (
+          <button
+            className="secondary-button"
+            disabled={hostedClient().sampleLoading}
+            onClick={() =>
+              sampleCommand(hostedClient().samplePlaying ? 'samplePause' : 'samplePlay')
+            }
+          >
+            {hostedClient().samplePlaying ? 'Pause' : 'Play sample'}
+          </button>
+        )}
         <button
           className="secondary-button"
           disabled={editor.open || !replay.reviewing}
-          onClick={replay.goLive}
+          onClick={() => (viewingSample ? replay.seek(0) : replay.goLive())}
         >
-          Return to latest
+          {viewingSample ? 'Restart sample' : 'Return to latest'}
         </button>
       </div>
       {(replay.error || liveStatus?.replay.error) && (
@@ -448,7 +503,15 @@ export default function App() {
           <span className="brand-mark">◈</span> jevolution
         </a>
         <nav className="top-links" aria-label="Arena views">
-          {(['habitat', 'analytics', 'notes', 'guide'] as const).map((item) => (
+          {(
+            [
+              'habitat',
+              'analytics',
+              'notes',
+              'guide',
+              ...(HOSTED && !onSignIn ? ['runs' as const] : []),
+            ] as const
+          ).map((item) => (
             <button
               key={item}
               className={view === item ? 'nav-active' : ''}
@@ -462,23 +525,106 @@ export default function App() {
                   analytics: 'Analytics',
                   notes: 'Field notes',
                   guide: 'Field guide',
+                  runs: 'Previous runs',
                 }[item]
               }
             </button>
           ))}
         </nav>
+        {onSignIn && (
+          <button className="secondary-button" onClick={onSignIn}>
+            Create account / Log in
+          </button>
+        )}
+        {HOSTED && onLogout && (
+          <button
+            className="secondary-button"
+            onClick={async () => {
+              try {
+                await hostedClient().request('logout');
+                const response = await fetch('/api/arena/account', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ action: 'logout' }),
+                });
+                if (!response.ok) throw new Error('Could not log out. Please retry.');
+                onLogout();
+              } catch (error) {
+                setError(error instanceof Error ? error.message : 'Could not log out.');
+              }
+            }}
+          >
+            Log out
+          </button>
+        )}
         <div className="top-meta">
           <span className={`connection-dot ${connected ? 'connected' : ''}`} />
           {connected
             ? HOSTED
-              ? hostedClient().authenticated
-                ? 'YOUR KEYS'
-                : 'PUBLIC DEMO'
+              ? viewingSample
+                ? 'SAMPLE REPLAY'
+                : hostedClient().authenticated
+                  ? 'YOUR ACCOUNT'
+                  : 'PUBLIC DEMO'
               : 'LOCAL SERVER'
             : 'CONNECTING'}
         </div>
       </header>
       <main className={view === 'habitat' ? 'habitat-main' : undefined}>
+        {viewingSample && (
+          <div className="sample-banner" role="status">
+            <div>
+              <strong>Sample simulation</strong>
+              <span>
+                No API credits needed. Explore, rewind, and inspect this recording. Editing is
+                locked.
+              </span>
+              {hostedClient().sampleReason && (
+                <span className="sample-reason">{hostedClient().sampleReason}</span>
+              )}
+              {hostedClient().sampleError && (
+                <span role="alert">
+                  {hostedClient().sampleError}{' '}
+                  <button onClick={() => sampleCommand('sampleRetry')}>Retry</button>
+                </span>
+              )}
+            </div>
+            <button className="primary-button" onClick={openKeys}>
+              Add API key to run your own
+            </button>
+          </div>
+        )}
+        {HOSTED && hostedClient().saveState && (
+          <div className="cloud-save-status" role="status">
+            {hostedClient().saveState}
+            {hostedClient().saveState.startsWith('Not saved') && (
+              <button
+                onClick={() =>
+                  void hostedClient()
+                    .request('retrySave')
+                    .catch((error) => setError(error.message))
+                }
+              >
+                Retry save
+              </button>
+            )}
+          </div>
+        )}
+        {HOSTED && hostedClient().archived && (
+          <div className="saved-run-banner">
+            Viewing a saved run. Use the rewind bar or Analytics to explore it.
+            <button
+              className="secondary-button"
+              onClick={async () => {
+                await hostedClient().request('closeSaved');
+                replay.goLive();
+                selectAnimal(null);
+              }}
+            >
+              Return to current habitat
+            </button>
+          </div>
+        )}
         {showAccess && (
           <RunAccessDialog
             onClose={() => setShowAccess(false)}
@@ -488,7 +634,7 @@ export default function App() {
             }}
           />
         )}
-        {view !== 'habitat' && populationSummary}
+        {view !== 'habitat' && view !== 'runs' && populationSummary}
         {error && (
           <div className="error-banner" role="alert">
             {error}
@@ -635,7 +781,9 @@ export default function App() {
                 </div>
                 <div className="run-status" aria-live="polite">
                   {replay.reviewing
-                    ? 'Reviewing recorded state. Resume continues from the latest state.'
+                    ? viewingSample
+                      ? 'Recorded sample. Playback uses no API credits.'
+                      : 'Reviewing recorded state. Resume continues from the latest state.'
                     : liveStatus?.reason || 'Connecting to the ecosystem…'}
                 </div>
                 <button className="analytics-link" onClick={() => navigate('analytics')}>
@@ -749,6 +897,16 @@ export default function App() {
               </div>
             </section>
           </section>
+        )}
+        {view === 'runs' && (
+          <PreviousRuns
+            onOpen={async (run) => {
+              await hostedClient().request('openSaved', { run });
+              replay.goLive();
+              selectAnimal(null);
+              navigate('habitat');
+            }}
+          />
         )}
         {view === 'guide' && <FieldGuide onReturn={() => navigate('habitat')} />}
         {view === 'analytics' && missingKeys && !HOSTED && (
@@ -872,10 +1030,7 @@ export default function App() {
                 onChange={(e) => {
                   const next = e.target.value as Scenario;
                   // Each scenario starts from its own defaults; the arena keeps its roster.
-                  setConfig({
-                    ...SCENARIO_CONFIG[next],
-                    experimentPreview: config.experimentPreview,
-                  });
+                  setConfig({ ...SCENARIO_CONFIG[next] });
                   setGroupsDraft(
                     next === 'predatorPrey'
                       ? PREDATOR_PREY_GROUPS
@@ -899,12 +1054,30 @@ export default function App() {
             ) : (
               <ModelSettings
                 groups={groupsDraft}
-                onChange={setGroupsDraft}
+                onChange={(groups) => {
+                  setGroupsDraft(groups);
+                  if (config.experimentPreview?.appliedToSimulation) {
+                    setConfig({
+                      ...config,
+                      experimentPreview: {
+                        ...config.experimentPreview,
+                        values: {
+                          ...config.experimentPreview.values,
+                          wolfCount: groups
+                            .filter((g) => g.species === 'wolf')
+                            .reduce((n, g) => n + (g.population || 0), 0),
+                        },
+                      },
+                    });
+                  }
+                }}
                 ready={liveStatus?.providerReady}
               />
             )}
             <ExperimentControls
               value={config.experimentPreview}
+              scenario={config.scenario ?? 'arena'}
+              groups={groupsDraft}
               disabled={!!liveStatus?.running || busy}
               onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
             />

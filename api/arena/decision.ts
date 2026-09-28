@@ -1,5 +1,11 @@
 import { PROVIDER_KEYS } from '../../core/src/evolution/constants.js';
 import type { ModelGroup, ModelObservation } from '../../core/src/evolution/types.js';
+import { decryptAccountKey } from '../../server/src/evolution/accountKeyVault.js';
+import {
+  accountFailure,
+  requireAccount,
+  storeJson,
+} from '../../server/src/evolution/accountStore.js';
 import { json, sameOrigin } from '../../server/src/evolution/hostedAuth.js';
 import { choose, ProviderError } from '../../server/src/evolution/models.js';
 
@@ -7,9 +13,12 @@ export default {
   async fetch(request: Request) {
     if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
     if (!sameOrigin(request)) return json({ error: 'Cross-origin access is disabled' }, 403);
-    const apiKey = request.headers.get('x-provider-key')?.trim();
-    if (!apiKey || apiKey.length > 4096 || /[^\x21-\x7e]/.test(apiKey))
-      return json({ error: 'Enter your own provider API key in API keys.' }, 401);
+    let user;
+    try {
+      user = await requireAccount(request);
+    } catch (error) {
+      return accountFailure(error);
+    }
     if (!request.headers.get('content-type')?.startsWith('application/json'))
       return json({ error: 'JSON required' }, 415);
     const text = await request.text();
@@ -49,6 +58,18 @@ export default {
     )
       return json({ error: 'Invalid model observation' }, 400);
     try {
+      const keys = await storeJson<{ ciphertext: string }[]>(
+        `jevolution_provider_keys?provider=eq.${group.provider}&select=ciphertext`,
+        user,
+      );
+      if (!keys?.length)
+        return json(
+          { error: 'Add a personal API key in your account to continue.', code: 'key_required' },
+          402,
+        );
+      const secret = process.env.ACCOUNT_KEY_ENCRYPTION_SECRET;
+      if (!secret) return json({ error: 'Account key encryption is not configured.' }, 503);
+      const apiKey = decryptAccountKey(secret, user.id, group.provider, keys[0].ciphertext);
       const result = await choose(
         group,
         observation,
@@ -64,7 +85,11 @@ export default {
       if (error instanceof ProviderError)
         return json(
           {
-            error: 'Provider request failed. Check your key, model access, and quota.',
+            error:
+              error.code === 'credits_exhausted'
+                ? 'Your provider reports insufficient credits or a spending limit. Add funds or check the billing limit for this key.'
+                : 'Provider request failed. Check your key, model access, and quota.',
+            code: error.code,
             status: error.status,
             retryAfterMs: error.retryAfterMs,
 

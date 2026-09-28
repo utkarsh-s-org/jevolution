@@ -381,6 +381,7 @@ export function applyDecision(
     r.signalUntil = world.time + RULES.signalLife;
     if (
       !world.experiment?.appliedToSimulation ||
+      world.experiment.values.messageLoss === 0 ||
       random(world) >= world.experiment.values.messageLoss / 100
     )
       world.signals.push({
@@ -392,7 +393,7 @@ export function applyDecision(
         delivered: world.time + RULES.signalDelay,
         expires: world.time + RULES.signalDelay + RULES.signalLife,
         range: world.experiment?.appliedToSimulation
-          ? world.experiment.values.signalRange * (0.375 + 0.625 * r.genes.sociability)
+          ? (3 + r.genes.sociability * 5) * (world.experiment.values.signalRange / 8)
           : 3 + r.genes.sociability * 5,
       });
     world.signals = world.signals.slice(-RULES.maxSignalHistory);
@@ -470,6 +471,7 @@ function reproduce(world: World, a: Rabbit, b: Rabbit) {
           0.95,
           (a.genes[k] + b.genes[k]) / 2 +
             (world.experiment?.appliedToSimulation &&
+            world.experiment.values.mutationRate < 100 &&
             random(world) >= world.experiment.values.mutationRate / 100
               ? 0
               : (random(world) - 0.5) * 2 * RULES.mutation),
@@ -513,6 +515,7 @@ export function stepWorld(world: World, dt: number) {
   }
   if (
     world.experiment?.appliedToSimulation &&
+    world.experiment.values.disasterArea < 100 &&
     world.time < world.droughtUntil &&
     !world.droughtTiles
   ) {

@@ -27,6 +27,9 @@ run([
   'core/src/evolution/mapEditor.test.ts',
   'core/src/evolution/predatorPrey.test.ts',
   'server/src/evolution/hosted.test.ts',
+  'server/src/evolution/accountKeyVault.test.ts',
+  'server/src/evolution/savedRuns.test.ts',
+  'server/src/evolution/sampleRun.test.ts',
 ]);
 
 // This includes TypeScript checks for api/, server/, core/, and the browser UI.
@@ -40,7 +43,13 @@ if (!readFileSync('dist/arena/index.html', 'utf8').includes('type="module"'))
 
 // Refuse a deployment that accidentally puts server credentials in public assets.
 const secrets = Object.entries(process.env)
-  .filter(([name, value]) => (name.endsWith('_API_KEY') || name === 'ARENA_ACCESS_CODE') && value)
+  .filter(
+    ([name, value]) =>
+      (name.endsWith('_API_KEY') ||
+        name === 'ARENA_ACCESS_CODE' ||
+        name === 'ACCOUNT_KEY_ENCRYPTION_SECRET') &&
+      value,
+  )
   .map(([, value]) => value);
 function scan(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {

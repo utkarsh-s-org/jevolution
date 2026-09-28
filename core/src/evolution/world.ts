@@ -493,30 +493,35 @@ export function createWorld(
   populateFood(world);
   if (experiment?.appliedToSimulation) {
     const v = experiment.values;
-    // Blend clustered fields with a uniform supply while preserving total capacity.
-    const land = world.tiles.filter((t) => t.kind === 'grass' || t.kind === 'forest');
-    const mean = land.reduce((n, t) => n + t.foodCapacity, 0) / land.length;
-    for (const tile of land) {
-      const original = tile.foodCapacity;
-      const clustering = v.foodClustering / 100;
-      const capacity =
-        clustering <= 0.5
-          ? mean * (1 - clustering * 2) + original * clustering * 2
-          : original * (original >= mean ? 1 + (clustering - 0.5) * 2 : 1 - (clustering - 0.5) * 2);
-      tile.foodCapacity = capacity;
+    if (v.foodClustering !== 50 || v.foodAbundance !== 100) {
+      // Blend clustered fields with a uniform supply while preserving total capacity.
+      const land = world.tiles.filter((t) => t.kind === 'grass' || t.kind === 'forest');
+      const mean = land.reduce((n, t) => n + t.foodCapacity, 0) / land.length;
+      const fill = land.map((tile) => (tile.foodCapacity ? tile.food / tile.foodCapacity : 0.8));
+      for (const tile of land) {
+        const original = tile.foodCapacity;
+        const clustering = v.foodClustering / 100;
+        const capacity =
+          clustering <= 0.5
+            ? mean * (1 - clustering * 2) + original * clustering * 2
+            : original *
+              (original >= mean ? 1 + (clustering - 0.5) * 2 : 1 - (clustering - 0.5) * 2);
+        tile.foodCapacity = capacity;
+      }
+      const total = land.reduce((n, t) => n + t.foodCapacity, 0);
+      const scale = total ? (((mean * land.length) / total) * v.foodAbundance) / 100 : 0;
+      for (const [index, tile] of land.entries()) {
+        tile.foodCapacity *= scale;
+        tile.food = tile.foodCapacity * fill[index];
+      }
     }
-    const total = land.reduce((n, t) => n + t.foodCapacity, 0);
-    const scale = total ? (((mean * land.length) / total) * v.foodAbundance) / 100 : 0;
-    for (const tile of land) {
-      tile.foodCapacity *= scale;
-      tile.food = tile.foodCapacity * 0.8;
-    }
-    for (const rabbit of world.rabbits)
-      for (const key of GENE_NAMES)
-        rabbit.genes[key] = Math.max(
-          0.05,
-          Math.min(0.95, 0.5 + ((rabbit.genes[key] - 0.5) * v.traitDiversity) / 50),
-        );
+    if (v.traitDiversity !== 50)
+      for (const rabbit of world.rabbits)
+        for (const key of GENE_NAMES)
+          rabbit.genes[key] = Math.max(
+            0.05,
+            Math.min(0.95, 0.5 + ((rabbit.genes[key] - 0.5) * v.traitDiversity) / 50),
+          );
   }
   world.history.push({
     time: 0,
