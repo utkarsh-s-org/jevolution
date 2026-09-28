@@ -3,6 +3,7 @@ import {
   PREDATOR_PREY_RULES as PP,
   PROVIDER_KEYS,
   RULES,
+  rulesFor,
 } from '../../../core/src/evolution/constants.js';
 import { type Experiments, LIFE } from '../../../core/src/evolution/experiments.js';
 import { ProviderError } from '../../../core/src/evolution/providerError.js';
@@ -69,6 +70,45 @@ function validateDecision(value: unknown, observation: ModelObservation): Decisi
     throw new ProviderError('Provider returned an invalid choice or signal');
   return { choice: d.choice, signal: d.signal as Decision['signal'] };
 }
+export interface DecisionOptions {
+  relief?: boolean;
+  predatorPrey?: boolean;
+  experiments?: Experiments;
+}
+export function instructionsFor(
+  isWolf: boolean,
+  { relief = true, predatorPrey = false, experiments }: DecisionOptions = {},
+) {
+  let instructions = isWolf
+    ? predatorPrey
+      ? PREDATOR_PREY_WOLF_INSTRUCTIONS
+      : WOLF_INSTRUCTIONS
+    : relief
+      ? INSTRUCTIONS
+      : PREY_INSTRUCTIONS;
+  if (experiments?.demographics) {
+    const species = isWolf ? 'wolf' : 'rabbit';
+    const life = LIFE[species];
+    instructions = `You control one ${species} in an experimental predator-prey ecosystem. Choose exactly one supplied legal action. Survive, maintain energy and hydration where relevant, and reproduce. Use only local observations. Reproduction is automatic only when eligible opposite-sex adults of your group meet within 1.7 tiles; it never happens alone. The female gestates for ${life.gestation} simulation seconds, then bears up to ${life.litter} offspring. Newborns depend on parents for ${life.dependent} seconds and mature at ${life.maturity} seconds. Parents reserve newborn energy at conception. Finite lifespans and population caps apply. Animals inherit traits, not learned model weights. Movement continues until replaced; hunting tracks only visible prey, shelters exclude attacks and hiding limits sight. Food choices eat on arrival. Rest does not restore energy. Optional local rabbit signals cost energy; wolves cannot signal. Follow the supplied choice descriptions. These are illustrative simulation units, not calibrated animal behavior. Return the action and signal without explanation.`;
+  }
+  if (experiments?.resources) {
+    const rules = rulesFor({ scenario: predatorPrey ? 'predatorPrey' : 'arena', experiments });
+    const life = LIFE[isWolf ? 'wolf' : 'rabbit'];
+    instructions = [
+      `You control one ${isWolf ? 'wolf' : 'rabbit'} in a moving experimental ecosystem. Choose one supplied legal action using only local observations. Survive and reproduce; zero energy or hydration kills. Rest does not refill energy.`,
+      experiments.demographics
+        ? `Reproduction needs eligible opposite-sex adults to meet within 1.7 tiles; gestation ${life.gestation}s, litter up to ${life.litter}, dependent young ${life.dependent}s, maturity ${life.maturity}s. Parents reserve child energy at conception; no solo births.`
+        : isWolf
+          ? `The baseline population-rate model automatically produces solo pups at ${rules.wolfBreedEnergy} energy, costing ${rules.wolfBreedCost}.`
+          : 'The baseline population-rate model automatically produces offspring when a fed mature rabbit is unthreatened.',
+      isWolf
+        ? `Movement costs ${rules.wolfMovementCost} energy per tile, plus ${rules.wolfMetabolism} per second. A catch creates a finite carcass containing 65% of the prey energy. There is no instant meal reward. Stay nearby or scavenge to eat at 8 energy per second. Other wolves can eat the same finite carcass. Attacks cost 0.6 energy and require 0.8s recovery even after failure. Eating cooldown ${rules.wolfEatCooldown}s. Drink at visible shores to maintain hydration.`
+        : `Forage for finite food (${rules.foodEnergy} energy per unit). Patches regrow slowly. Drinking depletes finite nearby water. You pay for movement and metabolism.`,
+      'A burrow protects only its first two occupants; overflow animals remain exposed. Forest cover limits visibility. Drought withers food and dries water; no path crosses water or mountains. Actions continue until replaced. Use supplied legal descriptions. Rabbits may send optional local signals at an energy cost; wolves choose none. These are illustrative simulation units, not calibrated biological predictions. Return no explanation.',
+    ].join(' ');
+  }
+  return instructions;
+}
 export async function choose(
   group: ModelGroup,
   observation: ModelObservation,
@@ -81,19 +121,11 @@ export async function choose(
 ): Promise<Result> {
   if (group.controller === 'deterministic')
     throw new ProviderError('Deterministic wolves do not use a model API');
-  let instructions =
-    'wolf' in observation
-      ? predatorPrey
-        ? PREDATOR_PREY_WOLF_INSTRUCTIONS
-        : WOLF_INSTRUCTIONS
-      : relief
-        ? INSTRUCTIONS
-        : PREY_INSTRUCTIONS;
-  if (experiments?.demographics) {
-    const species = 'wolf' in observation ? 'wolf' : 'rabbit';
-    const life = LIFE[species];
-    instructions = `You control one ${species} in an experimental predator-prey ecosystem. Choose exactly one supplied legal action. Survive, maintain energy and hydration where relevant, and reproduce. Use only local observations. Reproduction is automatic only when eligible opposite-sex adults of your group meet within 1.7 tiles; it never happens alone. The female gestates for ${life.gestation} simulation seconds, then bears up to ${life.litter} offspring. Newborns depend on parents for ${life.dependent} seconds and mature at ${life.maturity} seconds. Parents reserve newborn energy at conception. Finite lifespans and population caps apply. Animals inherit traits, not learned model weights. Movement continues until replaced; hunting tracks only visible prey, shelters exclude attacks and hiding limits sight. Food choices eat on arrival. Rest does not restore energy. Optional local rabbit signals cost energy; wolves cannot signal. Follow the supplied choice descriptions. These are illustrative simulation units, not calibrated animal behavior. Return the action and signal without explanation.`;
-  }
+  const instructions = instructionsFor('wolf' in observation, {
+    relief,
+    predatorPrey,
+    experiments,
+  });
   // "Need food" is offered only to a rabbit that is actually hungry, and only with relief on.
   const hungry =
     relief && 'rabbit' in observation && observation.rabbit.energy < RULES.hungryEnergy;

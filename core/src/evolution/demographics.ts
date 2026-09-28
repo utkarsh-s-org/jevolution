@@ -31,6 +31,15 @@ export function initializeLife(world: World, animal: Animal, founder: boolean) {
 export function configureExperiments(world: World, settings: Experiments) {
   if (world.time !== 0) throw new Error('Mechanisms can only be configured before a run starts.');
   world.experiments = { ...settings };
+  if (settings.resources) {
+    world.carcasses = [];
+    for (const tile of world.tiles) {
+      tile.food *= 0.75;
+      tile.foodCapacity *= 0.75;
+      if (tile.kind === 'water') tile.water = 100;
+    }
+    for (const wolf of world.wolves) wolf.water = 80;
+  }
   if (settings.demographics)
     for (const a of [...world.rabbits, ...world.wolves]) initializeLife(world, a, true);
 }

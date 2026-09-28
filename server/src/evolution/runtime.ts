@@ -9,6 +9,7 @@ import {
   choose,
   defaultGroups,
   INSTRUCTIONS,
+  instructionsFor,
   MODEL_DEFAULTS,
   PREDATOR_PREY_WOLF_INSTRUCTIONS,
   PREY_INSTRUCTIONS,
@@ -66,6 +67,16 @@ export class ArenaRuntime extends SimulationRuntime {
           path.join(logRoot, `${runId}.provenance.json`),
           JSON.stringify(
             {
+              actualGroupPrompts: Object.fromEntries(
+                (initial.world as World).groups.map((g) => [
+                  g.id,
+                  instructionsFor(g.species === 'wolf', {
+                    relief: !!rules.reliefEnabled,
+                    predatorPrey: (initial.world as World).scenario === 'predatorPrey',
+                    experiments: (initial.world as World).experiments,
+                  }),
+                ]),
+              ),
               prompts: {
                 PREY_INSTRUCTIONS,
                 INSTRUCTIONS,

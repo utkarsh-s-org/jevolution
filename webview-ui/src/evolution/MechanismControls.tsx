@@ -25,6 +25,15 @@ export function MechanismControls({
         #2 Demographics: paired reproduction, gestation, juvenile care and finite lifespans
       </label>
       <label>
+        <input
+          type="checkbox"
+          checked={settings.resources}
+          onChange={(e) => onChange({ ...settings, resources: e.target.checked })}
+        />{' '}
+        #3 Hunting and habitat: finite carcasses, attack recovery, movement cost, limited shelter
+        and water
+      </label>
+      <label>
         Immigration with demographics enabled{' '}
         <select
           value={settings.immigration}

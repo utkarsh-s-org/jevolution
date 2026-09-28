@@ -8,6 +8,16 @@ import {
   finishGestations,
 } from './demographics.js';
 import {
+  advanceHabitat,
+  attemptedCatch,
+  createCarcass,
+  drink,
+  feedWolf,
+  protectedRabbit,
+  shelterEntry,
+  waterSource,
+} from './habitat.js';
+import {
   finishDrought,
   recordRelief,
   reliefChoices,
@@ -60,14 +70,9 @@ export const mature = (r: Rabbit, RULES: Rules = BASE_RULES) =>
   r.energy >= RULES.breedEnergy &&
   r.water >= RULES.breedWater;
 export function nearWater(world: World, p: Point): boolean {
-  const c = cell(p);
-  return [
-    [0, 1],
-    [0, -1],
-    [1, 0],
-    [-1, 0],
-  ].some(([x, y]) => tileAt(world, { x: c.x + x, y: c.y + y })?.kind === 'water');
+  return !!waterSource(world, p);
 }
+
 function nearbyTiles(world: World, r: Rabbit) {
   const radius = vision(r);
   const c = cell(r);
@@ -237,7 +242,7 @@ export function observe(world: World, r: Rabbit): Observation {
     add(
       'hide',
       t,
-      `Hide in ${t.kind}. Shelters exclude attacks; forest reduces wolf detection to 2 tiles while hiding. Distance ${distance(r, t).toFixed(1)}.`,
+      `Hide in ${t.kind}. ${world.experiments?.resources ? 'Burrows protect only the first two occupants; overflow remains exposed' : 'Shelters exclude attacks'}; forest reduces wolf detection to 2 tiles while hiding. Distance ${distance(r, t).toFixed(1)}.`,
     );
   for (const [dx, dy, direction] of directions(world)) {
     const targets = tiles.filter((t) => (dx ? (t.x - r.x) * dx > 2 : (t.y - r.y) * dy > 2));
@@ -520,6 +525,7 @@ function reproduce(world: World, a: Rabbit, b: Rabbit) {
 export function stepWorld(world: World, dt: number) {
   const RULES = rulesFor(world);
   world.time += dt;
+  advanceHabitat(world, dt);
   const drought = world.time < world.droughtUntil;
   for (const t of world.tiles)
     if (t.kind === 'grass' || t.kind === 'forest') {
@@ -584,6 +590,7 @@ export function stepWorld(world: World, dt: number) {
     const juvenile = world.experiments?.demographics && r.age < RULES.maturity;
     const moved = move(r, dependent(world, r) ? 0 : speed * (juvenile ? 0.65 : 1), dt);
     r.energy -= moved * (RULES.movementCost + r.genes.speed * 0.14);
+    if (world.experiments?.resources) shelterEntry(world, r);
     if (!r.path.length) {
       const t = tileAt(world, r)!;
       stepRelief(world, r, t, dt);
@@ -606,8 +613,7 @@ export function stepWorld(world: World, dt: number) {
         r.energy += bite * RULES.foodEnergy;
         world.stats[r.lineage].food += bite;
       }
-      if (r.action === 'drink' && nearWater(world, r))
-        r.water = Math.min(100, r.water + dt * RULES.drinkRate);
+      if (r.action === 'drink' && nearWater(world, r)) drink(world, r, dt * RULES.drinkRate);
       // Predator–prey: births are a population rate — any mature pair close together breeds.
       const passive = !!RULES.passiveBreeding;
       if ((r.action === 'mate' || passive) && mature(r, RULES)) {
@@ -634,6 +640,8 @@ export function stepWorld(world: World, dt: number) {
     ageWolf(world, w, dt);
     careAndDisperse(world, w, dt);
     let caught = false;
+    if (world.experiments?.resources)
+      w.water = Math.max(0, (w.water ?? 80) - dt * (world.time < world.droughtUntil ? 0.5 : 0.2));
     w.cooldown = Math.max(0, w.cooldown - dt);
     if (world.time >= w.nextHunt) {
       w.nextHunt = world.time + 0.65;
@@ -702,8 +710,7 @@ export function stepWorld(world: World, dt: number) {
         (tileAt(world, w)?.kind === 'forest' ? RULES.forestSpeed : 1),
       dt,
     );
-    const reach = (r: Rabbit) =>
-      distance(w, r) < RULES.wolfCapture && tileAt(world, r)?.kind !== 'shelter';
+    const reach = (r: Rabbit) => distance(w, r) < RULES.wolfCapture && !protectedRabbit(world, r);
     const chased = world.rabbits.find((r) => r.id === w.target);
     // Predator–prey: kills follow encounters (Lotka-Volterra's β·R·W) — the chased rabbit or any
     // exposed rabbit the wolf reaches, so more rabbits nearby means more meals.
@@ -718,13 +725,21 @@ export function stepWorld(world: World, dt: number) {
       prey && RULES.wolfInterference
         ? world.wolves.filter((o) => o !== w && distance(o, w) <= 4).length
         : 0;
-    const interfered = rivals > 0 && random(world) >= 1 / (1 + RULES.wolfInterference * rivals);
+    const eligibleAttack =
+      !!prey &&
+      w.cooldown <= 0 &&
+      (!world.experiments?.demographics || (w.age ?? 0) >= RULES.wolfMaturity);
+    const attempt = !world.experiments?.resources || (eligibleAttack && attemptedCatch(world, w));
+    const interfered =
+      attempt && rivals > 0 && random(world) >= 1 / (1 + RULES.wolfInterference * rivals);
     if (
       prey &&
       w.cooldown <= 0 &&
       !interfered &&
+      attempt &&
       (!world.experiments?.demographics || (w.age ?? 0) >= RULES.wolfMaturity)
     ) {
+      if (world.experiments?.resources) createCarcass(world, prey, w);
       kill(world, prey, 'predation');
       caught = true;
       if (w.lineage && world.stats[w.lineage]) world.stats[w.lineage].kills++;
@@ -733,7 +748,11 @@ export function stepWorld(world: World, dt: number) {
       w.path = [];
       w.target = undefined;
     }
-    finishWolfLife(world, w, moved, caught);
+    if (world.experiments?.resources) {
+      if (!w.path.length && w.action === 'drink') drink(world, w, dt * RULES.drinkRate);
+      feedWolf(world, w, dt);
+    }
+    finishWolfLife(world, w, moved, caught && !world.experiments?.resources);
   }
   reproduceWolves(world);
   finishGestations(world);

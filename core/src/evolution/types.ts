@@ -52,6 +52,7 @@ export interface Point {
   y: number;
 }
 export interface Tile extends Point {
+  water?: number;
   edited?: boolean;
   kind: Terrain;
   food: number;
@@ -73,6 +74,8 @@ export interface LifeHistory {
   pregnancy?: { due: number; father: number; generation: number; fatherGenes?: Genes };
 }
 export interface Rabbit extends Point {
+  shelterKey?: string;
+  shelterArrival?: number;
   life?: LifeHistory;
   id: number;
   lineage: Lineage;
@@ -105,8 +108,11 @@ export interface Rabbit extends Point {
   helpRequestedAt?: number;
   nextHelpSignal: number;
 }
-export type WolfAction = 'rest' | 'hunt' | 'explore' | 'mate';
+export type WolfAction = 'rest' | 'hunt' | 'explore' | 'mate' | 'drink' | 'scavenge';
 export interface Wolf extends Point {
+  water?: number;
+  nextAttack?: number;
+  carcassId?: number;
   life?: LifeHistory;
   energy?: number;
   age?: number;
@@ -212,6 +218,7 @@ export interface Observation {
   choices: Candidate[];
 }
 export interface WolfCandidate {
+  carcassId?: number;
   id: string;
   action: WolfAction;
   description: string;
@@ -221,6 +228,7 @@ export interface WolfCandidate {
 }
 export interface WolfObservation {
   wolf: {
+    water?: number;
     id: number;
     position: Point;
     action: WolfAction;
@@ -327,6 +335,7 @@ export interface WorldEvent {
   lineage?: Lineage;
 }
 export interface World {
+  carcasses?: (Point & { id: number; energy: number; createdAt: number })[];
   experiments?: import('./experiments.js').Experiments;
   mechanisms?: Record<string, number>;
   scenario?: Scenario;
