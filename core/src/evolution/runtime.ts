@@ -207,9 +207,30 @@ export class SimulationRuntime {
     const predatorPrey = config.scenario === 'predatorPrey';
     const groups = predatorPrey
       ? PREDATOR_PREY_GROUPS.map((g) => ({ ...g, model: this.services.jevModel?.() || g.model }))
-      : validateGroups(roster);
+      : validateGroups(
+          roster,
+          experimentPreview?.appliedToSimulation ? { rabbit: 80, wolf: 20 } : undefined,
+        );
     this.pause();
-    this.world = createWorld(seed, groups, config.scenario);
+    if (experimentPreview?.appliedToSimulation) {
+      const wolves = groups.filter((g) => g.species === 'wolf');
+      const count = experimentPreview.values.wolfCount;
+      if (count && !wolves.length)
+        throw new Error('Add a wolf group before setting a positive wolf count.');
+      const total = wolves.reduce((n, g) => n + (g.population || 0), 0);
+      let remaining = count;
+      wolves.forEach((g, i) => {
+        const n =
+          i === wolves.length - 1
+            ? remaining
+            : Math.min(remaining, Math.round((count * (g.population || 0)) / total));
+        g.population = n;
+        remaining -= n;
+      });
+      for (let i = groups.length - 1; i >= 0; i--)
+        if (groups[i].species === 'wolf' && !groups[i].population) groups.splice(i, 1);
+    }
+    this.world = createWorld(seed, groups, config.scenario, experimentPreview);
     this.config = { ...config, experimentPreview };
     this.runId = this.services.id();
     this.decisions.clear();
@@ -334,6 +355,8 @@ export class SimulationRuntime {
     this.active.set(id, { lineage, controller, animal: rabbit });
     const queueMs = Math.max(0, (world.time - (rabbit.nextDecision ?? 0)) * 1000);
     const observation = 'genes' in rabbit ? observe(world, rabbit) : observeWolf(world, rabbit);
+    if (world.experiment?.appliedToSimulation)
+      observation.experiment = { ...world.experiment.values };
     const started = performance.now();
     stats.requested++;
     stats.queueMs.push(queueMs);

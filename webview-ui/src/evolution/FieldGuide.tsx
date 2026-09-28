@@ -272,6 +272,12 @@ export function FieldGuide({ onReturn }: { onReturn: () => void }) {
       <section className="side-panel guide-section" id="guide-signals">
         <div className="eyebrow">05 / OPTIONAL, LOCAL COMMUNICATION</div>
         <h2>A signal offers information, not an order.</h2>
+        <p>
+          Equations below describe baseline settings. Active experiment controls override range,
+          delay, cost, loss, food growth, predator pressure, and mutation. Temperature is an
+          illustrative model, not calibrated biology. Export a run to inspect its effective
+          settings.
+        </p>
         <div className="guide-signal-list">
           <span>
             <b>!</b> Danger
@@ -288,7 +294,7 @@ export function FieldGuide({ onReturn }: { onReturn: () => void }) {
         </div>
         <p>
           Signals refer to the sender’s position at emission, become available after{' '}
-          {RULES.signalDelay} seconds and expire {RULES.signalLife} seconds after emission. Either
+          {RULES.signalDelay} seconds and expire {RULES.signalLife} seconds after delivery. Either
           rabbit group can hear them within range. Seeing a message does not force any action; a
           model may follow, flee, forage or choose something else. Signals can be stale or wrong.
         </p>

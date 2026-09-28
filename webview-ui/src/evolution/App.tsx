@@ -315,8 +315,13 @@ export default function App() {
             onClick={() => {
               setConfig({
                 ...(liveStatus?.config || DEFAULT_CONFIG),
-                experimentPreview:
-                  liveStatus?.config.experimentPreview ?? defaultExperimentPreview(),
+                experimentPreview: liveStatus?.config.experimentPreview ?? {
+                  ...defaultExperimentPreview(),
+                  values: {
+                    ...defaultExperimentPreview().values,
+                    wolfCount: snapshot?.world.wolves.length ?? 10,
+                  },
+                },
               });
               setSeed(snapshot?.world.seed || DEFAULT_SEED);
               setGroupsDraft(snapshot?.world.groups || DEFAULT_GROUPS);
@@ -357,6 +362,15 @@ export default function App() {
             </svg>
           </button>
         </div>
+        {HOSTED && (
+          <button
+            className="secondary-button session-button"
+            disabled={busy || !connected}
+            onClick={() => setShowAccess(true)}
+          >
+            API keys
+          </button>
+        )}
         {!HOSTED && (
           <a className="export-link" href="/api/arena/export" download>
             Export run ↓
@@ -458,35 +472,10 @@ export default function App() {
           {connected
             ? HOSTED
               ? hostedClient().authenticated
-                ? 'UNLOCKED'
+                ? 'YOUR KEYS'
                 : 'PUBLIC DEMO'
               : 'LOCAL SERVER'
             : 'CONNECTING'}
-          {HOSTED && (
-            <button
-              className="secondary-button session-button"
-              disabled={busy || !connected}
-              onClick={async () => {
-                if (!hostedClient().authenticated) {
-                  setShowAccess(true);
-                  return;
-                }
-                setBusy(true);
-                try {
-                  await hostedClient().request('pause', { reason: 'Simulation locked.' });
-                  const response = await fetch('/api/arena/session', { method: 'DELETE' });
-                  if (!response.ok) throw new Error('Could not lock this session. Try again.');
-                  await hostedClient().request('refresh');
-                } catch (error) {
-                  setError(error instanceof Error ? error.message : 'Could not lock session.');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              {hostedClient().authenticated ? 'Lock' : 'Unlock'}
-            </button>
-          )}
         </div>
       </header>
       <main className={view === 'habitat' ? 'habitat-main' : undefined}>

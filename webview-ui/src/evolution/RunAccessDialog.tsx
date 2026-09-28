@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import type { Provider } from '../../../core/src/evolution/types.js';
+import { forgetDeviceKeys, KEY_PROVIDERS, readDeviceKeys, saveDeviceKeys } from './deviceKeys.js';
 export function RunAccessDialog({
   onClose,
   onUnlock,
@@ -8,83 +10,87 @@ export function RunAccessDialog({
   onUnlock: () => Promise<void>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [keys, setKeys] = useState(readDeviceKeys);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
+    const prior = document.activeElement as HTMLElement | null;
     const element = dialog.current;
-    const previousFocus = document.activeElement as HTMLElement | null;
     element?.showModal();
     return () => {
       element?.close();
-      previousFocus?.focus({ preventScroll: true });
+      prior?.focus();
     };
   }, []);
-
+  async function save(forget = false) {
+    setBusy(true);
+    setError('');
+    try {
+      if (forget) forgetDeviceKeys();
+      else saveDeviceKeys(keys);
+      await onUnlock();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'Could not save keys. Check browser storage permissions.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <dialog
       ref={dialog}
       className="run-access-dialog"
       aria-labelledby="run-access-title"
-      onCancel={(event) => {
-        if (busy) event.preventDefault();
-        else onClose();
-      }}
+      onCancel={onClose}
     >
       <form
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (busy) return;
-          setBusy(true);
-          setError('');
-          try {
-            const response = await fetch('/api/arena/session', {
-              method: 'POST',
-              credentials: 'same-origin',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ code: password }),
-            });
-            setPassword('');
-            if (!response.ok) {
-              const data = await response.json();
-              throw new Error(data.error || 'Could not unlock simulation.');
-            }
-            await onUnlock();
-          } catch (error) {
-            setError(error instanceof Error ? error.message : 'Could not unlock simulation.');
-          } finally {
-            setBusy(false);
-          }
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
         }}
       >
-        <h2 id="run-access-title">Unlock live runs</h2>
-        <p>Explore freely. Running AI agents requires the private password.</p>
-        <label htmlFor="run-password">Run password</label>
-        <input
-          id="run-password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          disabled={busy}
-          maxLength={256}
-          required
-        />
-        {error && (
-          <p className="access-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="access-actions">
-          <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>
-            Keep browsing
+        <h2 id="run-access-title">Your API keys</h2>
+        <p>Saved on this device. Calls use your provider account and credits.</p>
+        <p>
+          Keys pass through our server over HTTPS for each request. They are not saved on the server
+          or included in exports. Browser storage can be read by scripts on this site; use
+          restricted keys with provider spending limits.
+        </p>
+        {Object.entries(KEY_PROVIDERS).map(([provider, label]) => (
+          <label key={provider} htmlFor={`key-${provider}`}>
+            {label}
+            <input
+              id={`key-${provider}`}
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={4096}
+              value={keys[provider as Provider] || ''}
+              onChange={(e) => setKeys({ ...keys, [provider]: e.target.value })}
+              disabled={busy}
+            />
+          </label>
+        ))}
+        {error && <p role="alert">{error}</p>}
+        <div className="run-access-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void save(true)}
+            disabled={busy}
+          >
+            Forget keys
           </button>
-          <button className="primary-button" disabled={busy}>
-            {busy ? 'Unlocking…' : 'Unlock'}
+          <button type="button" className="secondary-button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="primary-button" disabled={busy}>
+            Save on device
           </button>
         </div>
-        <small>Access lasts one hour. Use Lock when you finish.</small>
       </form>
     </dialog>
   );

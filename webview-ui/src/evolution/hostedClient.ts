@@ -1,4 +1,5 @@
 import type { Snapshot } from '../../../core/src/evolution/types.js';
+import { readDeviceKeys } from './deviceKeys.js';
 
 export const HOSTED = import.meta.env.VITE_ARENA_HOSTED === 'true';
 class HostedClient {
@@ -30,6 +31,11 @@ class HostedClient {
         pending.reject(new Error('Simulation worker stopped. Reload to recover.'));
       this.pending.clear();
     };
+    void this.request('refresh').catch(() => {});
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'jevolution.provider-keys.v1' || event.key === null)
+        void this.request('refresh').catch(() => {});
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.snapshot?.status.running)
         void this.request('pause', {
@@ -41,7 +47,11 @@ class HostedClient {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: (value) => resolve(value as T), reject });
-      this.worker.postMessage({ id, action, data });
+      this.worker.postMessage({
+        id,
+        action,
+        data: action === 'refresh' ? { keys: readDeviceKeys() } : data,
+      });
     });
   }
   subscribe(listener: (snapshot: Snapshot) => void) {

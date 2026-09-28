@@ -379,16 +379,22 @@ export function applyDecision(
     r.energy -= RULES.signalCost * (1 + r.genes.sociability);
     r.lastSignal = decision.signal;
     r.signalUntil = world.time + RULES.signalLife;
-    world.signals.push({
-      x: r.x,
-      y: r.y,
-      sender: r.id,
-      lineage: r.lineage,
-      kind: decision.signal,
-      delivered: world.time + RULES.signalDelay,
-      expires: world.time + RULES.signalLife,
-      range: 3 + r.genes.sociability * 5,
-    });
+    if (
+      !world.experiment?.appliedToSimulation ||
+      random(world) >= world.experiment.values.messageLoss / 100
+    )
+      world.signals.push({
+        x: r.x,
+        y: r.y,
+        sender: r.id,
+        lineage: r.lineage,
+        kind: decision.signal,
+        delivered: world.time + RULES.signalDelay,
+        expires: world.time + RULES.signalDelay + RULES.signalLife,
+        range: world.experiment?.appliedToSimulation
+          ? world.experiment.values.signalRange * (0.375 + 0.625 * r.genes.sociability)
+          : 3 + r.genes.sociability * 5,
+      });
     world.signals = world.signals.slice(-RULES.maxSignalHistory);
     world.stats[r.lineage].signals++;
   }
@@ -460,7 +466,14 @@ function reproduce(world: World, a: Rabbit, b: Rabbit) {
       k,
       Math.max(
         0.05,
-        Math.min(0.95, (a.genes[k] + b.genes[k]) / 2 + (random(world) - 0.5) * 2 * RULES.mutation),
+        Math.min(
+          0.95,
+          (a.genes[k] + b.genes[k]) / 2 +
+            (world.experiment?.appliedToSimulation &&
+            random(world) >= world.experiment.values.mutationRate / 100
+              ? 0
+              : (random(world) - 0.5) * 2 * RULES.mutation),
+        ),
       ),
     ]),
   ) as Genes;
@@ -492,17 +505,39 @@ function reproduce(world: World, a: Rabbit, b: Rabbit) {
 export function stepWorld(world: World, dt: number) {
   const RULES = rulesFor(world);
   world.time += dt;
+  if (world.nextDrought !== undefined && world.time >= world.nextDrought) {
+    world.droughtUntil = world.time + 60;
+    world.nextDrought += 3600 / world.experiment!.values.disasterFrequency;
+    world.droughtTiles = undefined;
+    addEvent(world, 'system', 'Scheduled drought started (60 seconds).');
+  }
+  if (
+    world.experiment?.appliedToSimulation &&
+    world.time < world.droughtUntil &&
+    !world.droughtTiles
+  ) {
+    const centerIndex = Math.floor(random(world) * world.tiles.length);
+    const origin = world.tiles[centerIndex];
+    world.droughtTiles = world.tiles
+      .map((tile, index) => ({ index, d: distance(tile, origin) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, Math.ceil((world.tiles.length * world.experiment.values.disasterArea) / 100))
+      .map((t) => t.index);
+  }
+  if (world.time >= world.droughtUntil) world.droughtTiles = undefined;
+  const affected = world.droughtTiles ? new Set(world.droughtTiles) : undefined;
   const drought = world.time < world.droughtUntil;
   for (const t of world.tiles)
     if (t.kind === 'grass' || t.kind === 'forest') {
-      if (drought && t.kind === 'grass' && !nearWater(world, center(t)))
+      const localDrought = drought && (!affected || affected.has(t.y * GRID + t.x));
+      if (localDrought && t.kind === 'grass' && !nearWater(world, center(t)))
         t.food = Math.max(0, t.food - dt * RULES.droughtWither);
       t.food = Math.min(
         t.foodCapacity,
         t.food +
           dt *
             (t.foodCapacity / RULES.foodCapacity) *
-            (drought ? RULES.droughtRegrowth : RULES.foodRegrowth),
+            (localDrought ? RULES.droughtRegrowth : RULES.foodRegrowth),
       );
     }
   world.signals = world.signals.filter((s) => s.expires > world.time);
@@ -519,7 +554,11 @@ export function stepWorld(world: World, dt: number) {
       r.genes.speed * RULES.speedMetabolism -
       r.genes.thrift * 0.035;
     r.energy -= dt * basal * (r.action === 'rest' ? RULES.restMetabolism : 1);
-    r.water -= dt * (drought ? RULES.droughtThirst : RULES.thirst);
+    r.water -=
+      dt *
+      (drought && (!affected || affected.has(Math.floor(r.y) * GRID + Math.floor(r.x)))
+        ? RULES.droughtThirst
+        : RULES.thirst);
     const terrain = tileAt(world, r)!;
     const speed =
       (RULES.baseSpeed + r.genes.speed * RULES.speedGain - r.genes.thrift * 0.16) *

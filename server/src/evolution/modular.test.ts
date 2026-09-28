@@ -38,11 +38,15 @@ test('preview controls survive snapshots and replay without changing the seeded 
     runtime.reset(123, { ...DEFAULT_CONFIG });
     const baseline = structuredClone(runtime.world);
     const observation = observe(runtime.world, runtime.world.rabbits[0]);
-    const preview = defaultExperimentPreview();
+    const preview = {
+      ...defaultExperimentPreview(),
+      mode: 'preview-only' as const,
+      appliedToSimulation: false,
+    };
     preview.values.temperature = 40;
     preview.values.messageLoss = 95;
     runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: preview });
-    assert.deepEqual(runtime.world, baseline);
+    assert.deepEqual({ ...runtime.world, experiment: undefined }, baseline);
     assert.deepEqual(observe(runtime.world, runtime.world.rabbits[0]), observation);
     assert.deepEqual(runtime.snapshot().status.config.experimentPreview, preview);
     assert.deepEqual(runtime.replay.get(0).status.config.experimentPreview, preview);
@@ -456,5 +460,24 @@ test("a provider's long Retry-After pauses a group for at most a few seconds", a
     if (saved === undefined) delete process.env[key];
     else process.env[key] = saved;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('active settings set wolf counts and persist effective metadata in replay', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-active-'));
+  const runtime = new ArenaRuntime(directory);
+  try {
+    const settings = defaultExperimentPreview();
+    settings.values.wolfCount = 20;
+    settings.values.temperature = 40;
+    runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: settings });
+    assert.equal(runtime.world.wolves.length, 20);
+    assert.deepEqual(runtime.replay.get(0).status.config.experimentPreview, settings);
+    settings.values.wolfCount = 0;
+    runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: settings });
+    assert.equal(runtime.world.wolves.length, 0);
+  } finally {
+    runtime.dispose();
+    rmSync(directory, { recursive: true, force: true });
   }
 });

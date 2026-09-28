@@ -266,8 +266,31 @@ export const PREDATOR_PREY_RULES: Rules = {
   // small predator–prey systems collapse (Gause 1934, Huffaker 1958).
   migrationInterval: 20,
 };
-export function rulesFor(world: Pick<World, 'scenario'> | undefined): Rules {
-  return world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
+export function rulesFor(
+  world: (Pick<World, 'scenario'> & Partial<Pick<World, 'experiment'>>) | undefined,
+): Rules {
+  const base = world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
+  const e = world?.experiment;
+  if (!e?.appliedToSimulation || e.mode !== 'active') return base;
+  const v = e.values;
+  const cold = 1 + Math.max(0, 20 - v.temperature) * 0.02;
+  const heat = 1 + Math.max(0, v.temperature - 20) * 0.04;
+  const growth = Math.max(0.1, 1 - Math.abs(v.temperature - 20) * 0.025);
+  return {
+    ...base,
+    baseMetabolism: base.baseMetabolism * cold,
+    wolfMetabolism: base.wolfMetabolism * cold,
+    thirst: base.thirst * heat,
+    droughtThirst: base.droughtThirst * heat,
+    foodRegrowth: ((base.foodRegrowth * v.foodRegrowth) / 100) * growth,
+    droughtRegrowth:
+      ((base.foodRegrowth * v.foodRegrowth) / 100) * growth * (1 - v.disasterSeverity / 100),
+    droughtWither: (base.droughtWither * v.disasterSeverity) / 100,
+    wolfSpeed: (base.wolfSpeed * v.wolfSpeed) / 100,
+    wolfSight: v.wolfVision,
+    signalDelay: v.signalDelay / 1000,
+    signalCost: v.signalCost,
+  };
 }
 export const PREDATOR_PREY_BUDGET: Record<Species, number> = { rabbit: 80, wolf: 20 };
 export const PREDATOR_PREY_GROUPS: ModelGroup[] = [

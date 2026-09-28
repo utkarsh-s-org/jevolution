@@ -20,7 +20,7 @@ export function ExperimentControls({
       <section className="experiment-group" key={section.name} aria-label={section.name}>
         <h4>
           {section.name}
-          <span className="preview-badge">Preview only</span>
+          <span className="preview-badge">Applies on reset</span>
         </h4>
         <div className="experiment-sliders">
           {section.controls.map((c) => (
@@ -39,11 +39,13 @@ export function ExperimentControls({
                 step={c.step}
                 value={draft.values[c.key]}
                 disabled={disabled}
-                aria-valuetext={`${draft.values[c.key]} ${c.unit}. Preview only.`}
+                aria-valuetext={`${draft.values[c.key]} ${c.unit}. Applies on reset.`}
                 aria-describedby={`experiment-help-${c.key}`}
                 onChange={(e) =>
                   onChange({
                     ...draft,
+                    mode: 'active',
+                    appliedToSimulation: true,
                     values: { ...draft.values, [c.key]: Number(e.target.value) },
                   })
                 }
@@ -59,12 +61,12 @@ export function ExperimentControls({
     <details className="experiment-controls">
       <summary>
         <span>Experiment controls</span>
-        <span className="preview-badge">Preview only</span>
+        <span className="preview-badge">Applies on reset</span>
       </summary>
       <div className="experiment-body">
         <p className="experiment-notice">
-          Plan an experiment. These sliders do not change the simulation yet. Values are saved with
-          the run and exported as unapplied settings.
+          Settings take effect when you reset the habitat. Effective values are included in exported
+          runs. Temperature uses illustrative rules, not a calibrated biological model.
         </p>
         {group(0)}
         {group(1)}
@@ -82,7 +84,7 @@ export function ExperimentControls({
           disabled={disabled}
           onClick={() => onChange(defaultExperimentPreview())}
         >
-          Reset preview values
+          Reset experiment values
         </button>
       </div>
     </details>

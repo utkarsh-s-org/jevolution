@@ -72,11 +72,15 @@ export async function choose(
   group: ModelGroup,
   observation: ModelObservation,
   signal: AbortSignal,
-  { relief = true, predatorPrey = false }: { relief?: boolean; predatorPrey?: boolean } = {},
+  {
+    relief = true,
+    predatorPrey = false,
+    apiKey,
+  }: { relief?: boolean; predatorPrey?: boolean; apiKey?: string } = {},
 ): Promise<Result> {
   if (group.controller === 'deterministic')
     throw new ProviderError('Deterministic wolves do not use a model API');
-  const instructions =
+  const baseInstructions =
     'wolf' in observation
       ? predatorPrey
         ? PREDATOR_PREY_WOLF_INSTRUCTIONS
@@ -84,6 +88,11 @@ export async function choose(
       : relief
         ? INSTRUCTIONS
         : PREY_INSTRUCTIONS;
+  const instructions =
+    baseInstructions +
+    (observation.experiment
+      ? ' The observation includes active experiment settings that override baseline numbers above: wolfVision is sight in tiles; wolfSpeed and foodRegrowth are percentages of baseline; signalRange is maximum range scaled by sociability; signalDelay is milliseconds; messageLoss is percent lost. Temperature below 20 C raises base metabolism 2% per degree; above 20 C raises rabbit thirst 4% per degree; food growth falls 2.5% per degree away from 20 C, floored at 10%. These settings are shared by all providers.'
+      : '');
   // "Need food" is offered only to a rabbit that is actually hungry, and only with relief on.
   const hungry =
     relief && 'rabbit' in observation && observation.rabbit.energy < RULES.hungryEnergy;
@@ -118,7 +127,7 @@ export async function choose(
   };
   const description = 'Choose one supplied legal action ID and one optional local signal.';
   const headers: Record<string, string> = { 'content-type': 'application/json' };
-  const key = process.env[PROVIDER_KEYS[provider]];
+  const key = apiKey ?? process.env[PROVIDER_KEYS[provider]];
   if (!key) throw new ProviderError(`Missing ${PROVIDER_KEYS[provider]}`, 401);
   let url: string;
   let body: object;
