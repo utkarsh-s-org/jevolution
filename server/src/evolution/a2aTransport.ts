@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import type {
-  FoodTask,
+  CoordinationTask,
   ModelGroup,
   ModelObservation,
   Result,
@@ -11,6 +11,7 @@ import type {
 import {
   type ChooseOptions,
   CONTRACT,
+  ESCAPE_CONTRACT,
   type WorkerCommand,
   type WorkerEvent,
 } from './a2aProtocol.js';
@@ -31,6 +32,7 @@ export class A2ATransport {
   constructor(
     private onEvent: (event: WorkerEvent, worker: number) => void,
     private onFailure: (message: string) => void,
+    private contract: typeof CONTRACT | typeof ESCAPE_CONTRACT = CONTRACT,
   ) {}
   async start() {
     await Promise.all(
@@ -47,6 +49,7 @@ export class A2ATransport {
                 ...process.env,
                 ARENA_A2A_TOKEN: this.token,
                 ARENA_A2A_INDEX: String(index + 1),
+                ARENA_A2A_CONTRACT: this.contract,
               },
               stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
               execArgv: [],
@@ -152,13 +155,15 @@ export class A2ATransport {
     if (!event.result) throw new Error('A2A worker returned no decision');
     return event.result;
   }
-  async deliver(task: FoodTask) {
+  async deliver(task: CoordinationTask) {
     return this.request(this.owner(task.requester), {
       type: 'send',
       id: randomUUID(),
       url: this.endpoints[this.owner(task.helper)].url,
       request: {
-        contract: CONTRACT,
+        ...(task.kind === 'escape'
+          ? { contract: ESCAPE_CONTRACT, escape: task.escape }
+          : { contract: CONTRACT }),
         requestId: task.id,
         runId: task.runId,
         requester: task.requester,
@@ -167,7 +172,7 @@ export class A2ATransport {
       },
     });
   }
-  update(task: FoodTask) {
+  update(task: CoordinationTask) {
     if (!task.protocolTaskId) return;
     this.send(this.owner(task.helper), {
       type: 'update',
@@ -191,7 +196,7 @@ export class A2ATransport {
       reason: 'Request is not authorized in this run.',
     });
   }
-  async cancel(task: FoodTask) {
+  async cancel(task: CoordinationTask) {
     if (!task.protocolTaskId) return;
     await this.request(this.owner(task.requester), {
       type: 'cancel',
@@ -200,7 +205,7 @@ export class A2ATransport {
       taskId: task.protocolTaskId,
     });
   }
-  async inspect(task: FoodTask) {
+  async inspect(task: CoordinationTask) {
     if (!task.protocolTaskId) throw new Error('Task has no A2A identifier');
     return (
       await this.request(this.owner(task.requester), {

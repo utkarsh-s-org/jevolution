@@ -177,12 +177,13 @@ export interface Candidate {
     kind: 'request' | 'accept' | 'reject' | 'continue';
     peer: number;
     taskId?: string;
+    escape?: EscapeWarning;
   };
 }
 export type CoordinationMode = 'off' | 'local' | 'a2a';
 export type FoodTaskState =
   'sending' | 'submitted' | 'working' | 'completed' | 'rejected' | 'failed' | 'canceled';
-export interface FoodTask {
+export interface CoordinationTaskBase {
   id: string;
   runId: string;
   requester: number;
@@ -201,6 +202,10 @@ export interface FoodTask {
   protocolTaskId?: string;
   transportMs?: number;
   reason?: string;
+  history: { time: number; state: FoodTaskState; reason: string }[];
+}
+export interface FoodTask extends CoordinationTaskBase {
+  kind?: 'food';
   receipt?: {
     eventId: number;
     amount: number;
@@ -208,20 +213,46 @@ export interface FoodTask {
     energyAfter: number;
     time: number;
   };
-  history: { time: number; state: FoodTaskState; reason: string }[];
 }
+export interface EscapeWarning {
+  refuge: Point;
+  threat: Point;
+  observedAt: number;
+}
+export interface EscapeTask extends CoordinationTaskBase {
+  kind: 'escape';
+  escape: EscapeWarning;
+  acceptedPosition?: Point;
+  receipt?: {
+    eventId: number;
+    time: number;
+    position: Point;
+    refuge: Point;
+    terrain: 'shelter' | 'forest';
+    displacement: number;
+  };
+}
+export type CoordinationTask = FoodTask | EscapeTask;
 export interface CoordinationSnapshot {
   mode: CoordinationMode;
-  tasks: FoodTask[];
+  skill?: 'food' | 'escape';
+  tasks: CoordinationTask[];
   endpoints: { label: string; url: string }[];
   counts: Record<FoodTaskState, number>;
   foodDelivered: number;
+  coverArrivals?: number;
   error?: string;
 }
 export interface Observation {
   cooperation?: {
     goal: string;
-    requests: { taskId: string; requester: number; age: number; expiresIn: number }[];
+    requests: {
+      taskId: string;
+      requester: number;
+      age: number;
+      expiresIn: number;
+      escape?: EscapeWarning;
+    }[];
   };
   caches: FoodCache[];
   rabbit: {

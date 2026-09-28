@@ -756,11 +756,17 @@ export default function App() {
               />
             ) : (
               <section className="side-panel">
-                <h2>Food-delivery cooperation</h2>
+                <h2>
+                  {world?.scenario === 'predatorPrey'
+                    ? 'Local danger warnings'
+                    : 'Food-delivery cooperation'}
+                </h2>
                 <p>
                   {HOSTED
-                    ? 'Food tasks are available in the local arena. Hosted A2A support is not enabled yet.'
-                    : 'Enable local tasks or A2A tasks in run settings, then reset and start the model arena. Ordinary signals remain available in the original mode.'}
+                    ? 'Cooperation tasks are available in the local app. Hosted A2A support is not enabled yet.'
+                    : world?.scenario === 'predatorPrey'
+                      ? 'Enable warning tasks in run settings, then reset and start. Rabbits can warn nearby rabbits and invite them toward visible cover. Wolves keep their existing hunting behavior.'
+                      : 'Enable food tasks in run settings, then reset and start. Ordinary signals remain available in the original mode.'}
                 </p>
               </section>
             )}
@@ -947,7 +953,7 @@ export default function App() {
               disabled={!!liveStatus?.running || busy}
               onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
             />
-            {!HOSTED && config.scenario !== 'predatorPrey' && (
+            {!HOSTED && (
               <label className="scenario-setting">
                 Cooperation mode
                 <select
@@ -960,12 +966,22 @@ export default function App() {
                   }
                 >
                   <option value="off">Original signals</option>
-                  <option value="local">Food tasks · local transport</option>
-                  <option value="a2a">Food tasks · A2A services</option>
+                  <option value="local">
+                    {config.scenario === 'predatorPrey'
+                      ? 'Warning tasks · local transport'
+                      : 'Food tasks · local transport'}
+                  </option>
+                  <option value="a2a">
+                    {config.scenario === 'predatorPrey'
+                      ? 'Warning tasks · A2A services'
+                      : 'Food tasks · A2A services'}
+                  </option>
                 </select>
                 <span className="small-note">
-                  Task modes share the same community goal and food rules. A2A runs two independent
-                  agent services; local mode is the transport comparison.
+                  {config.scenario === 'predatorPrey'
+                    ? 'Rabbits choose whether to warn neighbors and move toward visible cover. Completion verifies arrival, not survival. Wolves and biology are unchanged.'
+                    : 'Task modes share the same community goal and food rules.'}{' '}
+                  A2A runs two independent agent services; local mode uses the same task rules.
                 </span>
               </label>
             )}

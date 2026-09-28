@@ -3,9 +3,11 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 
 import { SimulationRuntime } from '../../../core/src/evolution/runtime.js';
+import { CONTRACT, ESCAPE_CONTRACT } from './a2aProtocol.js';
 import { A2ATransport } from './a2aTransport.js';
 import { RunBudget } from './budget.js';
 import { FoodCoordinator } from './coordination.js';
+import { EscapeCoordinator } from './escapeCoordination.js';
 import { choose, defaultGroups, MODEL_DEFAULTS, providerReadiness } from './models.js';
 import { ReplayStore } from './replay.js';
 
@@ -27,7 +29,8 @@ export class ArenaRuntime extends SimulationRuntime {
       createBudget: () => new RunBudget(),
       createCoordination: async ({ mode, runId, world, record, onFailure }) => {
         transport = undefined;
-        let coordinator: FoodCoordinator | undefined;
+        const predatorPrey = world().scenario === 'predatorPrey';
+        let coordinator: FoodCoordinator | EscapeCoordinator | undefined;
         if (mode === 'a2a') {
           transport = new A2ATransport(
             (event, worker) => {
@@ -38,6 +41,7 @@ export class ArenaRuntime extends SimulationRuntime {
               if (coordinator) coordinator.error = message;
               onFailure(message);
             },
+            predatorPrey ? ESCAPE_CONTRACT : CONTRACT,
           );
           try {
             await transport.start();
@@ -47,7 +51,8 @@ export class ArenaRuntime extends SimulationRuntime {
             throw error;
           }
         }
-        coordinator = new FoodCoordinator(mode, runId, world, record, transport);
+        const Coordinator = predatorPrey ? EscapeCoordinator : FoodCoordinator;
+        coordinator = new Coordinator(mode, runId, world, record, transport);
         return coordinator;
       },
       createReplay: (runId) => new ReplayStore(logRoot, runId),

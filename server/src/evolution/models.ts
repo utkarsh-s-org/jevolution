@@ -17,6 +17,10 @@ export const MODEL_DEFAULTS = { jev: 'jev-1.13.0', claude: 'claude-haiku-4-5-202
 // Predator–prey turns off food carrying and sharing, so its rabbits skip that paragraph.
 export const PREY_INSTRUCTIONS =
   'You control one rabbit in a continuously moving ecosystem. Choose exactly one supplied legal action. Survive, maintain food energy and hydration, and reproduce with your lineage. Wolves can kill you while you wait. Use only your local observation and supplied personal memory. A movement action follows a path until another decision replaces it. Foraging and drinking continue on arrival. Rest conserves energy but cannot replenish it. Mating requires BOTH rabbits to choose each other and both to be healthy mature and nearby, and costs energy. Your inherited traits have engine-enforced tradeoffs: speed raises movement and energy use; vigilance widens vision and costs metabolism; thrift saves metabolism but slows movement and eating; fertility shortens reproduction cooldown but costs more energy; sociability increases signal range and signal cost. Memory contains only your own prior sightings at decision times, with ages: at most 4 food locations for 120 seconds, 2 water locations for 180 seconds, and 4 wolf sightings for 20 seconds. Old food may be depleted and wolves may have moved. Revisit choices let you inspect remembered locations. Memory is not inherited or shared automatically. You can observe neighbors moving and choose to follow a visible rabbit; tracking stops when it leaves sight. Receiving a signal never forces an action. Signals are optional, local, audible to either lineage, delayed, and cost energy. They refer to your current position and can be wrong. Choose the action and signal that best balance your survival and descendants. Do not provide a written explanation.';
+export const PREDATOR_PREY_RABBIT_INSTRUCTIONS = PREY_INSTRUCTIONS.replace(
+  'Mating requires BOTH rabbits to choose each other and both to be healthy mature and nearby, and costs energy.',
+  `Breeding happens automatically when you are mature, have at least ${PP.breedEnergy} energy and ${PP.breedWater} water, and your cooldown permits it. No mate choice is required. Crowding can prevent births, and births cost energy; fertility changes the cost and cooldown. Focus your decisions on survival and resources.`,
+);
 export const INSTRUCTIONS = PREY_INSTRUCTIONS.replace(
   ' Do not provide a written explanation.',
   ` You can carry up to 4 food units: collect removes food from the ground without eating it; eatCargo feeds yourself; share delivers it to a visible hungry rabbit; deposit and withdraw use communal caches at burrows. Every unit restores 4 energy. Caches are open to either lineage. Sharing is optional and costs you inventory; help is an optional request for food below 55 energy. During drought, exposed grass withers; forest and lakeside patches retain food better, and carried or cached food is protected. Choose whether to prepare, deliver, or conserve based on your local situation. Do not provide a written explanation.`,
@@ -85,9 +89,11 @@ export async function choose(
       ? predatorPrey
         ? PREDATOR_PREY_WOLF_INSTRUCTIONS
         : WOLF_INSTRUCTIONS
-      : relief
-        ? INSTRUCTIONS
-        : PREY_INSTRUCTIONS;
+      : predatorPrey
+        ? PREDATOR_PREY_RABBIT_INSTRUCTIONS
+        : relief
+          ? INSTRUCTIONS
+          : PREY_INSTRUCTIONS;
   if (cooperation && !('wolf' in observation)) {
     instructions = instructions
       .replace(
@@ -100,14 +106,17 @@ export async function choose(
       )
       .replace(
         'Foraging and drinking continue on arrival.',
-        'Foraging lasts a short bout after arrival and then stops until a new decision; drinking continues on arrival.',
+        predatorPrey
+          ? 'Foraging and drinking continue on arrival.'
+          : 'Foraging lasts a short bout after arrival and then stops until a new decision; drinking continues on arrival.',
       )
       .replace(
         'Rest conserves energy but cannot replenish it.',
         'Rest avoids movement cost but still consumes baseline metabolism and cannot replenish energy.',
       );
-    instructions +=
-      ' Your legal choices may include requesting food, accepting a request, continuing a delivery or declining it. Acceptance commits your current cargo and movement; choosing a different action can abandon the task. Successful delivery is determined by actual food transfer, not a promise. When you have surplus energy, consider collecting food to carry for nearby hungry rabbits. Only use the supplied local inbox and choices. Requests never force you to comply.';
+    instructions += predatorPrey
+      ? ' Your legal choices may include warning a visible neighbor and moving toward visible cover, accepting a warning, continuing that movement or declining. Warnings contain only an old wolf sighting, not live tracking. Respond using your current local view. Shelters exclude attacks; arriving in forest alone does not confer hiding: choose an ordinary hide action later when offered. A task completes only after you physically reach cover; it never certifies safety or longer survival. Choosing another action may abandon the task. There are no food-delivery tasks in this preset. Requests never force compliance.'
+      : ' Your legal choices may include requesting food, accepting a request, continuing a delivery or declining it. Acceptance commits your current cargo and movement; choosing a different action can abandon the task. Successful delivery is determined by actual food transfer, not a promise. When you have surplus energy, consider collecting food to carry for nearby hungry rabbits. Only use the supplied local inbox and choices. Requests never force you to comply.';
   }
   // "Need food" is offered only to a rabbit that is actually hungry, and only with relief on.
   const hungry =

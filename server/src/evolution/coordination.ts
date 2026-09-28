@@ -13,7 +13,7 @@ import type {
   World,
 } from '../../../core/src/evolution/types.js';
 import { visible } from '../../../core/src/evolution/world.js';
-import type { WorkerEvent } from './a2aProtocol.js';
+import { CONTRACT, type WorkerEvent } from './a2aProtocol.js';
 import { A2ATransport } from './a2aTransport.js';
 
 export const activeTask = (task: FoodTask) =>
@@ -45,6 +45,7 @@ export class FoodCoordinator {
     for (const t of this.tasks) counts[t.state]++;
     return {
       mode: this.mode,
+      skill: 'food',
       tasks: structuredClone(this.tasks.slice(-100)),
       endpoints: this.transport?.endpoints || [],
       counts,
@@ -198,6 +199,7 @@ export class FoodCoordinator {
       const task = this.tasks.find((t) => t.id === event.request.requestId);
       if (
         !task ||
+        event.request.contract !== CONTRACT ||
         !activeTask(task) ||
         task.protocolTaskId ||
         event.request.runId !== this.runId ||

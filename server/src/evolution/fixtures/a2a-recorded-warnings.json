@@ -1,0 +1,131 @@
+{
+  "provenance": {
+    "runId": "a37652b0-d3f1-4d43-99a1-ee801fd78903",
+    "scenario": "predatorPrey",
+    "seed": 8675309,
+    "sourceArtifact": "predator-live-result.json",
+    "sha256": "c7e18254381d0aaa17c9b5d0e26fa49a2cdea81d7527351d04ebe7ad4c4df333",
+    "note": "Actual live Jev decisions and engine outcomes from September 28, 2026; selected cross-service completed and canceled warnings."
+  },
+  "tasks": [
+    {
+      "kind": "escape",
+      "escape": {
+        "refuge": {
+          "x": 45.5,
+          "y": 54.5
+        },
+        "threat": {
+          "x": 40.69235759424,
+          "y": 53.5
+        },
+        "observedAt": 4.235227290999989
+      },
+      "id": "5990cc43-4c95-4855-895f-bb7ee9452e0c",
+      "runId": "a37652b0-d3f1-4d43-99a1-ee801fd78903",
+      "requester": 38,
+      "helper": 58,
+      "requesterGroup": "jev",
+      "helperGroup": "jev",
+      "requesterService": 2,
+      "helperService": 1,
+      "createdAt": 4.538140499999993,
+      "expiresAt": 16.538140499999994,
+      "state": "completed",
+      "decisionId": "9d47137d-7256-48bf-8d9c-b9f83c53c70f",
+      "history": [
+        {
+          "time": 4.538140499999993,
+          "state": "sending",
+          "reason": "Model warned a nearby rabbit and chose its own escape route."
+        },
+        {
+          "time": 4.741481124999988,
+          "state": "submitted",
+          "reason": "Local warning arrived in the recipient inbox."
+        },
+        {
+          "time": 6.833138332999983,
+          "state": "working",
+          "reason": "Recipient model accepted and chose to move toward cover."
+        },
+        {
+          "time": 13.430208375000023,
+          "state": "completed",
+          "reason": "Arrival in cover verified by the simulation engine; not a claim of survival benefit."
+        }
+      ],
+      "reason": "Arrival in cover verified by the simulation engine; not a claim of survival benefit.",
+      "protocolTaskId": "a0698ab5-ef0c-40db-a0b6-e9cf663d5ed4",
+      "transportMs": 5.950375000000349,
+      "acceptedAt": 6.833138332999983,
+      "acceptedDecisionId": "749eff57-fb22-4d95-a8b8-aa3e52ed3de8",
+      "acceptedPosition": {
+        "x": 43.5,
+        "y": 60.5
+      },
+      "receipt": {
+        "eventId": 32,
+        "time": 13.430208375000023,
+        "position": {
+          "x": 45.04880005960135,
+          "y": 54.5
+        },
+        "refuge": {
+          "x": 45.5,
+          "y": 54.5
+        },
+        "terrain": "shelter",
+        "displacement": 6.196675045911407
+      },
+      "finishedAt": 13.430208375000023
+    },
+    {
+      "kind": "escape",
+      "escape": {
+        "refuge": {
+          "x": 54.5,
+          "y": 32.5
+        },
+        "threat": {
+          "x": 52.5,
+          "y": 37.227602909279994
+        },
+        "observedAt": 9.51973066599999
+      },
+      "id": "d8ca1c17-7384-47df-ba24-53f63b25209f",
+      "runId": "a37652b0-d3f1-4d43-99a1-ee801fd78903",
+      "requester": 2,
+      "helper": 84,
+      "requesterGroup": "jev",
+      "helperGroup": "jev",
+      "requesterService": 2,
+      "helperService": 1,
+      "createdAt": 9.62214708299999,
+      "expiresAt": 21.62214708299999,
+      "state": "canceled",
+      "decisionId": "ff90aab4-c316-4d1b-90c2-afe9bd42aa5d",
+      "history": [
+        {
+          "time": 9.62214708299999,
+          "state": "sending",
+          "reason": "Model warned a nearby rabbit and chose its own escape route."
+        },
+        {
+          "time": 9.825264415999996,
+          "state": "submitted",
+          "reason": "Local warning arrived in the recipient inbox."
+        },
+        {
+          "time": 14.549529000000042,
+          "state": "canceled",
+          "reason": "Run complete \u00b7 export your observations or reset."
+        }
+      ],
+      "reason": "Run complete \u00b7 export your observations or reset.",
+      "protocolTaskId": "641df3f5-f48d-494d-9b77-b6ec7aa2c95f",
+      "transportMs": 1.4874169999966398,
+      "finishedAt": 14.549529000000042
+    }
+  ]
+}

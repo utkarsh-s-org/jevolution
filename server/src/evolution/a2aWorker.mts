@@ -26,9 +26,19 @@ import {
 import { agentCardHandler, jsonRpcHandler } from '@a2a-js/sdk/server/express';
 import express from 'express';
 
-import { CONTRACT, type FoodRequest, type WorkerCommand, type WorkerEvent } from './a2aProtocol.js';
+import {
+  CONTRACT,
+  type CooperationRequest,
+  ESCAPE_CONTRACT,
+  type WorkerCommand,
+  type WorkerEvent,
+} from './a2aProtocol.js';
 import { choose, ProviderError } from './models.js';
 
+const contract = process.env.ARENA_A2A_CONTRACT || CONTRACT;
+if (contract !== CONTRACT && contract !== ESCAPE_CONTRACT)
+  throw new Error('Unknown cooperation skill.');
+const escapeSkill = contract === ESCAPE_CONTRACT;
 const token = process.env.ARENA_A2A_TOKEN;
 if (!token || !process.send) throw new Error('Start A2A workers through the arena runtime.');
 const emit = (event: WorkerEvent) => {
@@ -81,7 +91,9 @@ function update(taskId: string, state: keyof typeof states, reason: string, rece
           lastChunk: true,
           artifact: {
             artifactId: taskId + ':receipt',
-            name: 'Engine-verified food transfer',
+            name: escapeSkill
+              ? 'Engine-verified arrival in cover'
+              : 'Engine-verified food transfer',
             parts: [{ data: receipt }],
           },
         }),
@@ -113,14 +125,19 @@ class Executor implements AgentExecutor {
   async execute(context: RequestContext, bus: ExecutionEventBus) {
     const data = context.userMessage.parts.find((p) => p.content?.$case === 'data')?.content;
     const request = (data?.$case === 'data' ? data.value : undefined) as unknown as
-      FoodRequest | undefined;
+      CooperationRequest | undefined;
     const valid =
-      request?.contract === CONTRACT &&
+      request?.contract === contract &&
       typeof request.requestId === 'string' &&
       typeof request.runId === 'string' &&
       Number.isSafeInteger(request.requester) &&
       Number.isSafeInteger(request.helper) &&
-      Number.isFinite(request.expiresAt);
+      Number.isFinite(request.expiresAt) &&
+      (request.contract !== ESCAPE_CONTRACT ||
+        (Number.isFinite(request.escape?.observedAt) &&
+          [request.escape?.refuge, request.escape?.threat].every(
+            (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y),
+          )));
     const task = Task.fromJSON({
       id: context.taskId,
       contextId: context.contextId,
@@ -133,7 +150,7 @@ class Executor implements AgentExecutor {
     await new Promise<void>((finish) => {
       jobs.set(context.taskId, { bus, contextId: context.contextId, finish });
       if (!valid || !request || seen.has(request.requestId) || seen.size >= 2000) {
-        update(context.taskId, 'rejected', 'Invalid, duplicate, or exhausted delivery request.');
+        update(context.taskId, 'rejected', 'Invalid, duplicate, or exhausted cooperation request.');
         return;
       }
       seen.add(request.requestId);
@@ -161,8 +178,9 @@ const server = app.listen(0, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${address.port}`;
   const card = AgentCard.fromJSON({
     name: `Jevolution peer ${process.env.ARENA_A2A_INDEX}`,
-    description:
-      'Rabbit food-delivery agent; requires the Jevolution food contract and authorized local observations.',
+    description: escapeSkill
+      ? 'Rabbit cover-warning agent; requires the Jevolution warning contract and authorized local observations.'
+      : 'Rabbit food-delivery agent; requires the Jevolution food contract and authorized local observations.',
     version: '1.0.0',
     supportedInterfaces: [{ url, protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
     capabilities: { streaming: true },
@@ -172,11 +190,12 @@ const server = app.listen(0, '127.0.0.1', () => {
     securityRequirements: [{ schemes: { arena: { list: [] } } }],
     skills: [
       {
-        id: CONTRACT,
-        name: 'Deliver food',
-        description:
-          'Accept or reject a locally authorized food request. Completion requires an engine receipt.',
-        tags: ['jevolution', 'food'],
+        id: contract,
+        name: escapeSkill ? 'Respond to a cover warning' : 'Deliver food',
+        description: escapeSkill
+          ? 'Accept or reject a local warning. Completion requires actual arrival in cover, not a promise of survival.'
+          : 'Accept or reject a locally authorized food request. Completion requires an engine receipt.',
+        tags: ['jevolution', escapeSkill ? 'predator-prey' : 'food'],
       },
     ],
   });

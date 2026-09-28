@@ -1,13 +1,13 @@
-# A2A food cooperation
+# A2A cooperation
 
-This optional model-arena mode implements one application skill, `jevolution.food-delivery.v1`, over A2A 1.0 JSON-RPC and SSE with the pinned official `@a2a-js/sdk@1.2.1`.
+The local app supports `jevolution.food-delivery.v1` in Model arena and `jevolution.cover-warning.v1` in Predator–prey, over A2A 1.0 JSON-RPC and SSE with the pinned official `@a2a-js/sdk@1.2.1`.
 
 ## Try it
 
 1. Configure the existing provider keys in `.env.arena`. No additional Google key is required.
 2. Run `npm run arena:build`, then `npm run arena`.
-3. Pause, open settings, select **Model arena**, and choose a cooperation mode. Set request, duration and optional API spending limits. Reset to apply settings.
-4. Start the ecosystem. The **Cooperation** tab shows model-selected tasks, service identities, lifecycle history, decision IDs, and food-transfer receipts. Inspect an actor to see its real decisions in Habitat. Pause and scrub the timeline to see historical task states.
+3. Pause, open settings, select **Model arena** or **Predator–prey**, and choose a cooperation mode. Set request, duration and optional API spending limits. Reset to apply settings.
+4. Start the ecosystem. The **Cooperation** tab shows model-selected tasks, service identities, lifecycle history, decision IDs, and physical outcome receipts. Inspect an actor to see its real decisions in Habitat. Pause and scrub the timeline to see historical task states.
 
 The three modes have different purposes:
 
@@ -17,11 +17,21 @@ The three modes have different purposes:
 | Food tasks · local transport | Community-survival goal, bounded request inboxes and delivery commitments inside the arena process.                                       |
 | Food tasks · A2A services    | Same task goal and legal choices, with model calls in two child processes and cooperation transported through authenticated A2A services. |
 
-The task modes also clarify existing foraging and resting mechanics in the prompt. Comparing them with Original signals tests this whole behavior change. Comparing local with A2A isolates the transport architecture more closely, but live model outputs and scheduling still vary.
+Food-task modes also clarify existing foraging and resting mechanics in the prompt. Comparing them with Original signals tests this whole behavior change. Comparing local with A2A isolates the transport architecture more closely, but live model outputs and scheduling still vary.
 
-Food sharing is disabled in the predator–prey preset, so this first skill is intentionally available only in Model arena. The preset remains available with its existing behavior.
+Food sharing remains disabled in Predator–prey. Its settings offer **Warning tasks · local transport** and **Warning tasks · A2A services** instead. The local/A2A modes share their warning goal and mechanics. Wolves retain their original hunting behavior; no wolf-to-wolf task skill is claimed.
 
-## What actually happens
+## Predator–prey warnings
+
+A rabbit must currently see a wolf, an eligible nearby rabbit and cover before its model is offered a warning choice. Choosing it costs the same energy as an ordinary signal and moves the sender toward the advertised cover using the existing flee action. Both rabbits must be within mutual sight and sociability range. The receiver must also see the cover and have a route to it. The warning carries a frozen wolf sighting with its timestamp and a cover location; it never updates from hidden world state.
+
+At its ordinary scheduled turn, the receiver may accept, decline, ignore or later abandon the request. Acceptance uses a flee movement to visible cover. It does not turn the receiver into a follower automatically or grant extra inference turns. The warning remains usable after its sender leaves or dies once it has already reached the inbox; it expires after twelve simulation seconds. Before inbox delivery, mutual contact is still required. Cooldown is six seconds and delivery has the ordinary 0.2-second signal delay; both also experience real service/model delays.
+
+Completion requires the living receiver to move from its acceptance position and enter the advertised forest/shelter tile. The arena records the arrival position, displacement, time and event ID; the service publishes this as an A2A artifact. **Arrival is not proof of longer survival.** Forest concealment still requires the ordinary hide action, when offered, and all existing predator rules apply. The **Cooperation** view and replay show actual warnings, responses, arrivals and interruptions separately.
+
+The scenario-aware rabbit prompt accurately describes existing automatic solo breeding in this preset. The engine's reproduction, terrain, wolf interference, sight, movement, resource and predation rules are unchanged. Baseline comparisons must account for the cooperation goal and additional choices; protocol speed alone is not an ecological benefit.
+
+## Model arena food delivery
 
 A hungry rabbit can choose to request food from up to two eligible visible carriers offered in its legal choices. Each request addresses one carrier. Both animals must be within sight and the sociability-dependent communication range. Requesting costs existing signal energy. There is one active request per requester and one task per helper, a six-second request cooldown, a 0.2-second simulation delivery delay, and a twenty-second simulation deadline.
 
@@ -52,8 +62,10 @@ npm run arena:check
 npm run arena:a2a:check
 ```
 
-The A2A check starts two actual local SDK servers and replays two recorded application requests from run `e8712d68-fa1a-467f-b5bf-782d3bddf933`. The checked-in fixture includes source provenance, an artifact hash, actual decision IDs and an actual engine receipt. It verifies discovery authentication, cross-process transport, submitted/working/completed states, receipt artifacts, `GetTask`, duplicate suppression, `CancelTask`, and terminal-state preservation. It makes **no model calls** and is a protocol regression check, not a new model-quality result.
+The A2A check starts two actual local SDK servers for each contract. It replays recorded food requests from run `e8712d68-fa1a-467f-b5bf-782d3bddf933` and recorded predator–prey warnings from run `a37652b0-d3f1-4d43-99a1-ee801fd78903`. The checked-in fixtures include source provenance, artifact hashes, actual decision IDs and engine receipts. It verifies discovery authentication, cross-process transport, submitted/working/completed states, receipt artifacts, `GetTask`, duplicate suppression, `CancelTask`, and terminal-state preservation. It makes **no model calls** and is a protocol regression check, not a new model-quality result.
 
-The implementation was also exercised with live Jev and Claude decisions from a previously recorded drought state. Two requests completed in the final twenty-second continuation, including one across processes. That is evidence that the path works; it is not evidence of improved ecological accuracy, reliable population growth, large-scale throughput, or guaranteed cooperation.
+On September 28, a fresh live predator–prey check completed three cover arrivals (one across services), with one warning canceled at the bounded run stop. A separate Model arena compatibility run completed two food tasks. These are functional demonstrations, not matched survival comparisons.
+
+The original food implementation was also exercised with live Jev and Claude decisions from a previously recorded drought state. Two requests completed in the final twenty-second continuation, including one across processes. That is evidence that the path works; it is not evidence of improved ecological accuracy, reliable population growth, large-scale throughput, or guaranteed cooperation.
 
 Official references: [A2A specification](https://a2a-protocol.org/latest/specification/), [JavaScript SDK](https://github.com/a2aproject/a2a-js).

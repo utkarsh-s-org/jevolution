@@ -10,28 +10,31 @@ export function CoordinationPanel({
   const data = snapshot?.coordination;
   if (!data) return null;
   const total = Object.values(data.counts).reduce((a, b) => a + b, 0);
+  const escape = data.skill === 'escape';
   return (
     <section className="side-panel coordination-panel" aria-label="Agent cooperation">
       <div className="eyebrow">
         {data.mode === 'a2a' ? 'A2A · INDEPENDENT SERVICES' : 'LOCAL · SAME TASK RULES'}
       </div>
-      <h2>Requests become commitments.</h2>
+      <h2>{escape ? 'A warning. A decision. A move to cover.' : 'Requests become commitments.'}</h2>
       <p className="small-note">
-        Rabbits choose whether to help across model groups. A task succeeds only when food actually
-        arrives. This history follows the replay time.
+        {escape
+          ? 'A nearby rabbit reports a wolf sighting and suggests visible cover. The recipient chooses its response. Completion verifies arrival, not a survival advantage.'
+          : 'Rabbits choose whether to help across model groups. A task succeeds only when food actually arrives.'}{' '}
+        This history follows the replay time.
       </p>
       <div className="relief-totals">
         <div>
           <strong>{total}</strong>
-          <span>requests</span>
+          <span>{escape ? 'warnings' : 'requests'}</span>
         </div>
         <div>
           <strong>{data.counts.completed}</strong>
-          <span>verified deliveries</span>
+          <span>{escape ? 'verified cover arrivals' : 'verified deliveries'}</span>
         </div>
         <div>
-          <strong>{data.foodDelivered.toFixed(1)}</strong>
-          <span>food transferred</span>
+          <strong>{escape ? data.counts.working : data.foodDelivered.toFixed(1)}</strong>
+          <span>{escape ? 'moving toward cover' : 'food transferred'}</span>
         </div>
       </div>
       {data.error && <p role="alert">{data.error}</p>}
@@ -50,14 +53,15 @@ export function CoordinationPanel({
         </details>
       )}
       <p className="small-note">
-        Waiting {data.counts.sending + data.counts.submitted} · Delivering {data.counts.working} ·
-        Declined {data.counts.rejected} · Failed {data.counts.failed} · Canceled{' '}
-        {data.counts.canceled}
+        Waiting {data.counts.sending + data.counts.submitted} · {escape ? 'Moving' : 'Delivering'}{' '}
+        {data.counts.working} · Declined {data.counts.rejected} · Failed {data.counts.failed} ·
+        Canceled {data.counts.canceled}
       </p>
       {!total && (
         <p className="small-note">
-          No requests yet. A hungry rabbit can ask a nearby food carrier; models can also forage or
-          share without a task.
+          {escape
+            ? 'No warnings yet. A rabbit must see a wolf, a nearby recipient and suitable cover before its model can choose to warn.'
+            : 'No requests yet. A hungry rabbit can ask a nearby food carrier; models can also forage or share without a task.'}
         </p>
       )}
       <div className="coordination-list">
@@ -68,11 +72,19 @@ export function CoordinationPanel({
             <details key={task.id} className={`coordination-task task-${task.state}`}>
               <summary>
                 #{task.requester} → #{task.helper} <b>{task.state}</b>
-                {task.receipt ? ` · ${task.receipt.amount.toFixed(1)} food` : ''}
+                {task.receipt
+                  ? task.kind === 'escape'
+                    ? ` · reached ${task.receipt.terrain}`
+                    : ` · ${task.receipt.amount.toFixed(1)} food`
+                  : ''}
               </summary>
               <div className="coordination-actions">
-                <button onClick={() => onSelect(task.requester)}>Inspect requester</button>
-                <button onClick={() => onSelect(task.helper)}>Inspect helper</button>
+                <button onClick={() => onSelect(task.requester)}>
+                  {task.kind === 'escape' ? 'Inspect sender' : 'Inspect requester'}
+                </button>
+                <button onClick={() => onSelect(task.helper)}>
+                  {task.kind === 'escape' ? 'Inspect recipient' : 'Inspect helper'}
+                </button>
               </div>
               <p>{task.reason}</p>
               {task.requesterService !== undefined && (
@@ -87,6 +99,13 @@ export function CoordinationPanel({
                   ? ''
                   : ` · A2A arrival ${task.transportMs.toFixed(1)} ms`}
               </p>
+              {task.kind === 'escape' && (
+                <p className="small-note">
+                  Wolf last seen at ({task.escape.threat.x.toFixed(1)},{' '}
+                  {task.escape.threat.y.toFixed(1)}) at {task.escape.observedAt.toFixed(2)}s.
+                  Suggested cover: ({task.escape.refuge.x}, {task.escape.refuge.y}).
+                </p>
+              )}
               <ol>
                 {task.history.map((event, index) => (
                   <li key={index}>
@@ -94,13 +113,20 @@ export function CoordinationPanel({
                   </li>
                 ))}
               </ol>
-              {task.receipt && (
-                <p>
-                  Engine event #{task.receipt.eventId}: energy{' '}
-                  {task.receipt.energyBefore.toFixed(1)} → {task.receipt.energyAfter.toFixed(1)} at{' '}
-                  {task.receipt.time.toFixed(2)}s.
-                </p>
-              )}
+              {task.receipt &&
+                (task.kind === 'escape' ? (
+                  <p>
+                    Engine event #{task.receipt.eventId}: reached {task.receipt.terrain} at{' '}
+                    {task.receipt.time.toFixed(2)}s, {task.receipt.displacement.toFixed(1)} tiles
+                    from the acceptance position. Arrival does not guarantee safety.
+                  </p>
+                ) : (
+                  <p>
+                    Engine event #{task.receipt.eventId}: energy{' '}
+                    {task.receipt.energyBefore.toFixed(1)} → {task.receipt.energyAfter.toFixed(1)}{' '}
+                    at {task.receipt.time.toFixed(2)}s.
+                  </p>
+                ))}
               <dl>
                 <dt>Request</dt>
                 <dd>{task.id}</dd>

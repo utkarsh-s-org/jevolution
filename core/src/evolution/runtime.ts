@@ -55,9 +55,7 @@ export class SimulationRuntime {
     if (mode === 'off' || this.coordinator) return;
     if (this.preparing) return this.preparing;
     if (!this.services.createCoordination)
-      throw new Error('Food coordination requires the local arena server.');
-    if (this.config.scenario === 'predatorPrey')
-      throw new Error('Food coordination requires the model arena scenario.');
+      throw new Error('Coordination requires the local arena server.');
     if (Object.values(this.readiness()).some((ready) => !ready))
       throw new Error('Configure the provider API keys before preparing agent services.');
     this.preparing = this.services
@@ -263,9 +261,7 @@ export class SimulationRuntime {
     if (this.preparing) throw new Error('Wait for coordination setup before resetting.');
     if (config.coordination && config.coordination !== 'off') {
       if (!this.services.createCoordination)
-        throw new Error('Food coordination requires the local arena server.');
-      if (config.scenario === 'predatorPrey')
-        throw new Error('Food coordination requires the model arena scenario.');
+        throw new Error('Coordination requires the local arena server.');
     }
     if (config.maxCostUsd !== undefined && !this.services.createBudget)
       throw new Error('Dollar limits require the local arena server.');
