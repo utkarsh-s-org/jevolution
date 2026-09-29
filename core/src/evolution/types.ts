@@ -52,6 +52,7 @@ export interface Point {
   y: number;
 }
 export interface Tile extends Point {
+  water?: number;
   edited?: boolean;
   kind: Terrain;
   food: number;
@@ -66,7 +67,18 @@ export interface Memory {
   food?: number;
   wolfId?: number;
 }
+export interface LifeHistory {
+  sex: 'female' | 'male';
+  deathAge: number;
+  dispersed: boolean;
+  pregnancy?: { due: number; father: number; generation: number; fatherGenes?: Genes };
+}
 export interface Rabbit extends Point {
+  committedUntil?: number;
+  knownTiles?: number[];
+  shelterKey?: string;
+  shelterArrival?: number;
+  life?: LifeHistory;
   id: number;
   lineage: Lineage;
   genes: Genes;
@@ -98,8 +110,15 @@ export interface Rabbit extends Point {
   helpRequestedAt?: number;
   nextHelpSignal: number;
 }
-export type WolfAction = 'rest' | 'hunt' | 'explore' | 'mate';
+export type WolfAction = 'rest' | 'hunt' | 'explore' | 'mate' | 'drink' | 'scavenge' | 'follow';
 export interface Wolf extends Point {
+  committedUntil?: number;
+  knownTiles?: number[];
+  followId?: number;
+  water?: number;
+  nextAttack?: number;
+  carcassId?: number;
+  life?: LifeHistory;
   energy?: number;
   age?: number;
   generation?: number;
@@ -122,6 +141,7 @@ export interface Wolf extends Point {
   target?: number;
 }
 export interface LocalSignal extends Point {
+  messageId?: string;
   sender: number;
   lineage: Lineage;
   kind: Signal;
@@ -178,6 +198,8 @@ export interface Observation {
   experiment?: import('./experimentPreview.js').ExperimentPreview['values'];
   caches: FoodCache[];
   rabbit: {
+    sex?: 'female' | 'male';
+    pregnancyDue?: number;
     id: number;
     age: number;
     generation: number;
@@ -200,11 +222,13 @@ export interface Observation {
     moving: boolean;
     heading: Point | null;
   }[];
-  signals: { sender: number; kind: Signal; position: Point; age: number }[];
+  signals: { id?: string; sender: number; kind: Signal; position: Point; age: number }[];
   memory: (Omit<Memory, 'observedAt' | 'wolfId'> & { age: number })[];
   choices: Candidate[];
 }
 export interface WolfCandidate {
+  followId?: number;
+  carcassId?: number;
   id: string;
   action: WolfAction;
   description: string;
@@ -214,7 +238,11 @@ export interface WolfCandidate {
 }
 export interface WolfObservation {
   experiment?: import('./experimentPreview.js').ExperimentPreview['values'];
+  signals?: { id?: string; sender: number; kind: Signal; position: Point; age: number }[];
   wolf: {
+    sex?: 'female' | 'male';
+    pregnancyDue?: number;
+    water?: number;
     id: number;
     position: Point;
     action: WolfAction;
@@ -235,7 +263,7 @@ export interface WolfObservation {
     action: WolfAction;
     ally: boolean;
     mateId?: number;
-    readyToMate: boolean;
+    readyToMate?: boolean;
   }[];
   choices: WolfCandidate[];
 }
@@ -305,6 +333,7 @@ export interface LineageStats {
   outputTokens: number;
   latencies: number[];
   queueMs: number[];
+  queueWallMs?: number[];
   food: number;
   signals: number;
 }
@@ -321,6 +350,10 @@ export interface WorldEvent {
   lineage?: Lineage;
 }
 export interface World {
+  nextPerception?: number;
+  carcasses?: (Point & { id: number; energy: number; createdAt: number })[];
+  experiments?: import('./experiments.js').Experiments;
+  mechanisms?: Record<string, number>;
   scenario?: Scenario;
   mapRevision?: number;
   groups: ModelGroup[];
@@ -349,6 +382,7 @@ export interface World {
   migrants?: { wolves: number; rabbits: number; lastAt: number };
 }
 export interface RunConfig {
+  experiments?: import('./experiments.js').Experiments;
   /** Unapplied experiment design metadata, not physics or model input. */
   experimentPreview?: import('./experimentPreview.js').ExperimentPreview;
   scenario?: Scenario;
@@ -363,6 +397,14 @@ export interface RunConfig {
   maxSeconds: number;
 }
 export interface PublicStatus {
+  clock?: {
+    mode: 'research' | 'realtime';
+    round: number;
+    roundSeconds: number;
+    phase: string;
+    queued: number;
+  };
+  readOnly?: boolean;
   running: boolean;
   reason: string;
   ready: Record<Lineage, boolean>;

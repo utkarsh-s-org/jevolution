@@ -8,7 +8,9 @@ import {
   RULES,
   rulesFor,
 } from './constants.js';
+import { configureExperiments } from './demographics.js';
 import { defaultExperimentPreview, validateExperimentPreview } from './experimentPreview.js';
+import { BASELINE_EXPERIMENTS } from './experiments.js';
 import { applyDecision, observe, stepWorld } from './simulation.js';
 import { createWorld } from './world.js';
 
@@ -173,4 +175,44 @@ test('mutation zero preserves identical parental traits across births', () => {
   const children = w.rabbits.filter((r) => r.generation > 0);
   assert.ok(children.length > 0);
   assert.ok(children.every((r) => Object.values(r.genes).every((g) => g === 0.5)));
+});
+
+test('neutral environmental controls preserve opt-in mechanism rules and seeded trajectories', () => {
+  for (const scenario of ['arena', 'predatorPrey'] as const) {
+    const groups = scenario === 'predatorPrey' ? PREDATOR_PREY_GROUPS : DEFAULT_GROUPS;
+    for (const switches of [
+      { resources: true },
+      { demographics: true },
+      { decisions: true },
+      { resources: true, demographics: true, decisions: true },
+    ]) {
+      const baseline = createWorld(123, groups, scenario);
+      const active = createWorld(123, groups, scenario, defaultExperimentPreview(scenario, groups));
+      for (const w of [baseline, active]) {
+        configureExperiments(w, { ...BASELINE_EXPERIMENTS, ...switches });
+        w.droughtUntil = 60;
+      }
+      assert.deepEqual(rulesFor(active), rulesFor(baseline));
+      for (let frame = 0; frame < 20; frame++) {
+        stepWorld(baseline, 0.05);
+        stepWorld(active, 0.05);
+      }
+      assert.deepEqual({ ...active, experiment: undefined }, baseline);
+    }
+  }
+});
+
+test('environmental sliders scale the selected resource mechanism instead of restoring preset rules', () => {
+  const experiment = defaultExperimentPreview('predatorPrey');
+  const experiments = { ...BASELINE_EXPERIMENTS, resources: true, demographics: true };
+  const baseline = rulesFor({ scenario: 'predatorPrey', experiments });
+  experiment.values.foodRegrowth = 200;
+  experiment.values.disasterSeverity = 200;
+  const changed = rulesFor({ scenario: 'predatorPrey', experiment, experiments });
+  assert.deepEqual(changed, {
+    ...baseline,
+    foodRegrowth: baseline.foodRegrowth * 2,
+    droughtRegrowth: 0,
+    droughtWither: baseline.droughtWither * 2,
+  });
 });

@@ -6,16 +6,21 @@ import {
   SCENARIO_CONFIG,
   validateGroups,
 } from './constants.js';
+import { canReconsider } from './decisionDynamics.js';
 import { DecisionJournal } from './decisions.js';
+import { configureExperiments, dependent } from './demographics.js';
 import { validateExperimentPreview } from './experimentPreview.js';
+import { validateExperiments } from './experiments.js';
 import { editWorldMap, validateMapEdits } from './mapEditor.js';
 import { ProviderError } from './providerError.js';
+import { costBreakdown, experimentReport } from './reporting.js';
 import type { RuntimeReplay, RuntimeServices } from './runtimePorts.js';
-import { applyDecision, observe, stepWorld } from './simulation.js';
+import { applyDecision, observe, senseWorld, stepWorld } from './simulation.js';
 import type {
   DecisionTrace,
   Lineage,
   ModelGroup,
+  ModelObservation,
   PublicStatus,
   Rabbit,
   RunConfig,
@@ -47,6 +52,23 @@ export class SimulationRuntime {
   private tickTimer: ReturnType<typeof setInterval>;
   private lastTick = performance.now();
   private savedInitial = false;
+  private researchRound = 0;
+  private researchQueue:
+    { animal: Rabbit | Wolf; observation: ModelObservation; queuedAt: number }[] | undefined;
+  private researchResults: { animalId: number; apply: () => void; cancel: () => void }[] = [];
+  private researchOrder: number[] = [];
+  readonly metrics = {
+    replayCaptures: 0,
+    replayMs: 0,
+    logRecords: 0,
+    logMs: 0,
+    ticks: 0,
+    tickMs: 0,
+    maxTickMs: 0,
+  };
+  report() {
+    return { ...experimentReport(this.snapshot()), performance: { ...this.metrics } };
+  }
   replay: RuntimeReplay;
   private services: RuntimeServices;
   constructor(services: RuntimeServices) {
@@ -68,9 +90,11 @@ export class SimulationRuntime {
   }
   private actors() {
     return [
-      ...this.world.rabbits,
+      ...this.world.rabbits.filter((r) => !dependent(this.world, r)),
       ...this.world.wolves.filter(
-        (w) => this.world.groups.find((g) => g.id === w.lineage)?.controller === 'model',
+        (w) =>
+          !dependent(this.world, w) &&
+          this.world.groups.find((g) => g.id === w.lineage)?.controller === 'model',
       ),
     ];
   }
@@ -81,7 +105,10 @@ export class SimulationRuntime {
     return Object.values(this.world.stats).reduce((sum, s) => sum + s.requested, 0);
   }
   private captureReplay() {
+    const started = performance.now();
     this.replay.capture(this.snapshot());
+    this.metrics.replayCaptures++;
+    this.metrics.replayMs += performance.now() - started;
   }
   readiness() {
     const ready = this.services.providerReadiness();
@@ -99,24 +126,26 @@ export class SimulationRuntime {
     const inFlight = this.zeros();
     for (const item of this.active.values()) inFlight[item.lineage]++;
     const backlog = this.zeros();
-    for (const r of this.actors())
-      if (!r.pending && (r.nextDecision ?? 0) <= this.world.time) backlog[r.lineage!]++;
-    const a = this.world.stats;
-    const knownPrice =
-      this.world.groups.filter((g) => g.controller !== 'deterministic').length === 2 &&
-      this.world.groups
-        .filter((g) => g.controller !== 'deterministic')
-        .every(
-          (g) =>
-            (g.id === 'jev' &&
-              g.provider === 'typesafe' &&
-              g.model === this.services.modelDefaults.jev) ||
-            (g.id === 'claude' &&
-              g.provider === 'anthropic' &&
-              g.model === this.services.modelDefaults.claude),
-        );
+    if (this.config.experiments?.researchClock) {
+      for (const job of this.researchQueue ?? []) backlog[job.animal.lineage!]++;
+    } else {
+      for (const r of this.actors())
+        if (!r.pending && (r.nextDecision ?? 0) <= this.world.time && canReconsider(this.world, r))
+          backlog[r.lineage!]++;
+    }
     return {
       running: this.running,
+      clock: {
+        mode: this.config.experiments?.researchClock ? 'research' : 'realtime',
+        round: this.researchRound,
+        roundSeconds: 2,
+        phase: !this.running
+          ? 'paused'
+          : this.researchQueue
+            ? 'collecting decisions with world paused'
+            : 'advancing',
+        queued: this.researchQueue?.length ?? 0,
+      },
       providerReady: this.services.providerReadiness(),
       replay: { frames: this.replay.frames, intervalMs: RULES.tickMs, error: this.replay.error },
       reason: this.reason,
@@ -127,19 +156,14 @@ export class SimulationRuntime {
       config: { ...this.config },
       runId: this.runId,
       connections: this.connections,
-      estimatedCost:
-        this.world.scenario === 'predatorPrey'
-          ? // Every predator–prey call is Jev (TypeSafe), priced like the arena's Jev group.
-            (Object.values(a).reduce((sum, s) => sum + s.inputTokens, 0) * 0.042) / 1e6
-          : knownPrice
-            ? (a.jev.inputTokens * 0.042 + a.claude.inputTokens + a.claude.outputTokens * 5) / 1e6
-            : null,
+      estimatedCost: costBreakdown(this.world).usd,
     };
   }
   snapshot(): Snapshot {
     return { world: this.world, status: this.status(), decisions: this.decisions.snapshot() };
   }
   private record(event: Record<string, unknown>) {
+    const started = performance.now();
     try {
       this.services.record(this.runId, {
         wallTime: new Date().toISOString(),
@@ -149,6 +173,9 @@ export class SimulationRuntime {
       });
     } catch {
       this.pause('Recording failed. Run stopped to avoid losing decision provenance.');
+    } finally {
+      this.metrics.logRecords++;
+      this.metrics.logMs += performance.now() - started;
     }
   }
   start() {
@@ -177,7 +204,9 @@ export class SimulationRuntime {
     }
     this.running = true;
     this.lastTick = performance.now();
-    this.reason = 'Live decisions · world continues during inference';
+    this.reason = this.config.experiments?.researchClock
+      ? 'Research clock · world waits for each decision round.'
+      : 'Live decisions · world continues during inference';
     this.failures = this.zeros();
     this.record({ type: 'start', config: this.config, groups: this.world.groups });
     this.captureReplay();
@@ -186,6 +215,10 @@ export class SimulationRuntime {
     this.running = false;
     this.reason = reason;
     this.epoch++;
+    for (const result of this.researchResults) result.cancel();
+    this.researchResults = [];
+    this.researchQueue = undefined;
+    this.researchOrder = [];
     for (const [id, item] of this.active) {
       item.controller.abort();
       const trace = this.decisions.get(item.animal.id).find((entry) => entry.id === id);
@@ -201,6 +234,7 @@ export class SimulationRuntime {
   }
   reset(seed: number, config: RunConfig, roster: ModelGroup[] = this.world.groups) {
     const experimentPreview = validateExperimentPreview(config.experimentPreview);
+    const experiments = validateExperiments(config.experiments);
     if (this.active.size)
       throw new Error('Pending calls are still cancelling. Try resetting in a moment.');
     // Predator–prey always runs its preset: Jev rabbits vs Jev wolves with a wolf life cycle.
@@ -231,11 +265,15 @@ export class SimulationRuntime {
         if (groups[i].species === 'wolf' && !groups[i].population) groups.splice(i, 1);
     }
     this.world = createWorld(seed, groups, config.scenario, experimentPreview);
-    this.config = { ...config, experimentPreview };
+    configureExperiments(this.world, experiments);
+    this.config = { ...config, experimentPreview, experiments };
     this.runId = this.services.id();
     this.decisions.clear();
     this.replay = this.services.createReplay(this.runId);
     this.savedInitial = false;
+    this.researchRound = 0;
+    for (const key of Object.keys(this.metrics) as (keyof typeof this.metrics)[])
+      this.metrics[key] = 0;
     this.backoff = this.zeros();
     this.reason = 'New habitat ready. Configure keys for the selected providers, then start.';
     this.captureReplay();
@@ -291,10 +329,23 @@ export class SimulationRuntime {
     this.captureReplay();
   }
   private tick() {
+    if (!this.running) return this.advance();
+    const started = performance.now();
+    try {
+      this.advance();
+    } finally {
+      const elapsed = performance.now() - started;
+      this.metrics.ticks++;
+      this.metrics.tickMs += elapsed;
+      this.metrics.maxTickMs = Math.max(this.metrics.maxTickMs, elapsed);
+    }
+  }
+  private advance() {
     const now = performance.now();
     const elapsed = (now - this.lastTick) / 1000;
     this.lastTick = now;
     if (!this.running) return;
+    if (this.config.experiments?.researchClock) return this.advanceResearch();
     // Avoid silently awarding free survival during laptop sleep or a blocked event loop.
     if (elapsed > 1) {
       this.pause(
@@ -318,7 +369,13 @@ export class SimulationRuntime {
       this.ecologyFinished()
     ) {
       this.record({ type: 'finished', snapshot: this.snapshot() });
-      this.pause('Run complete · export your observations or reset.');
+      this.pause(
+        this.world.time >= this.config.maxSeconds
+          ? 'Run complete · simulation horizon reached.'
+          : requested >= this.config.maxRequests
+            ? 'Request cap reached before simulation horizon · export this partial run.'
+            : 'Run stopped · no active population remains.',
+      );
       return;
     }
     const status = this.status();
@@ -331,7 +388,11 @@ export class SimulationRuntime {
       let slots = this.config.maxInFlight - status.inFlight[lineage];
       const due = this.actors()
         .filter(
-          (r) => r.lineage === lineage && !r.pending && (r.nextDecision ?? 0) <= this.world.time,
+          (r) =>
+            r.lineage === lineage &&
+            !r.pending &&
+            (r.nextDecision ?? 0) <= this.world.time &&
+            canReconsider(this.world, r),
         )
         .sort((a, b) => (a.nextDecision ?? 0) - (b.nextDecision ?? 0) || a.id - b.id);
       for (const rabbit of due) {
@@ -341,7 +402,86 @@ export class SimulationRuntime {
     }
     this.captureReplay();
   }
-  private async dispatch(rabbit: Rabbit | Wolf) {
+  private advanceResearch() {
+    if (this.world.time >= this.config.maxSeconds) {
+      this.record({ type: 'finished', snapshot: this.snapshot() });
+      this.pause('Run complete · exact simulation horizon reached.');
+      return;
+    }
+    if (this.ecologyFinished()) {
+      this.pause('Run stopped · no active population remains.');
+      return;
+    }
+    if (!this.researchQueue) {
+      senseWorld(this.world);
+      const actors = this.actors()
+        .filter((a) => canReconsider(this.world, a))
+        .sort((a, b) => a.id - b.id);
+      if (this.requested() + actors.length > this.config.maxRequests) {
+        this.pause('Request cap cannot cover a complete decision round · partial experiment.');
+        return;
+      }
+      const offset = actors.length ? this.researchRound % actors.length : 0;
+      const order = [...actors.slice(offset), ...actors.slice(0, offset)];
+      const queuedAt = performance.now();
+      this.researchOrder = order.map((a) => a.id);
+      this.researchQueue = order.map((animal) => ({
+        animal,
+        queuedAt,
+        observation: structuredClone(
+          'genes' in animal ? observe(this.world, animal) : observeWolf(this.world, animal),
+        ),
+      }));
+      this.record({
+        type: 'research-round-start',
+        round: this.researchRound,
+        animalIds: this.researchOrder,
+        worldTime: this.world.time,
+      });
+    }
+    // One global concurrency allowance; population size does not change the time an animal experiences.
+    while (
+      this.running &&
+      this.researchQueue.length &&
+      this.active.size < this.config.maxInFlight
+    ) {
+      const job = this.researchQueue.shift()!;
+      void this.dispatch(job.animal, job.observation, job.queuedAt);
+    }
+    if (!this.running || this.researchQueue.length || this.active.size) return;
+    const rank = new Map(this.researchOrder.map((id, i) => [id, i]));
+    const results = this.researchResults.sort(
+      (a, b) => rank.get(a.animalId)! - rank.get(b.animalId)!,
+    );
+    this.researchResults = [];
+    for (const result of results) result.apply();
+    if (!this.running) return;
+    this.record({
+      type: 'research-round-commit',
+      round: this.researchRound,
+      animalIds: results.map((r) => r.animalId),
+      worldTime: this.world.time,
+    });
+    this.researchQueue = undefined;
+    this.researchRound++;
+    const target = Math.min(this.config.maxSeconds, this.world.time + 2);
+    while (target - this.world.time > 1e-9) {
+      stepWorld(this.world, Math.min(RULES.tickMs / 1000, target - this.world.time));
+      this.world.time = Math.round(this.world.time * 1e9) / 1e9;
+      this.captureReplay();
+    }
+    this.world.time = target;
+    if (this.world.time >= this.config.maxSeconds) {
+      this.record({ type: 'finished', snapshot: this.snapshot() });
+      this.pause('Run complete · exact simulation horizon reached.');
+    }
+  }
+  private async dispatch(
+    rabbit: Rabbit | Wolf,
+    frozenObservation?: ModelObservation,
+    queuedAt?: number,
+  ) {
+    const research = !!frozenObservation;
     const world = this.world;
     const config = { ...this.config };
     const epoch = this.epoch;
@@ -353,14 +493,33 @@ export class SimulationRuntime {
     const controller = new AbortController();
     rabbit.pending = true;
     this.active.set(id, { lineage, controller, animal: rabbit });
-    const queueMs = Math.max(0, (world.time - (rabbit.nextDecision ?? 0)) * 1000);
-    const observation = 'genes' in rabbit ? observe(world, rabbit) : observeWolf(world, rabbit);
+    const queueMs = research
+      ? 0
+      : Math.max(
+          0,
+          (world.time -
+            Math.max(
+              rabbit.nextDecision ?? 0,
+              world.experiments?.decisions ? (rabbit.committedUntil ?? 0) : 0,
+            )) *
+            1000,
+        );
+    const observation =
+      frozenObservation ??
+      ('genes' in rabbit ? observe(world, rabbit) : observeWolf(world, rabbit));
+    const queueWallMs =
+      queuedAt === undefined ? undefined : Math.max(0, performance.now() - queuedAt);
+    if (queueWallMs !== undefined) (stats.queueWallMs ??= []).push(queueWallMs);
     if (world.experiment?.appliedToSimulation)
       observation.experiment = { ...world.experiment.values };
     const started = performance.now();
     stats.requested++;
     stats.queueMs.push(queueMs);
-    const deadline = config.timing === 'equalized' ? config.equalizedMs : config.deadlineMs;
+    const deadline = research
+      ? 15000
+      : config.timing === 'equalized'
+        ? config.equalizedMs
+        : config.deadlineMs;
     let trace: DecisionTrace = {
       id,
       animalId: rabbit.id,
@@ -384,7 +543,7 @@ export class SimulationRuntime {
     publish({});
     const timeout = setTimeout(
       () => controller.abort(new Error('timeout')),
-      Math.max(15000, deadline + 2000),
+      research ? deadline : Math.max(15000, deadline + 2000),
     );
     this.record({
       type: 'observation',
@@ -394,12 +553,14 @@ export class SimulationRuntime {
       rabbitId: isWolf ? undefined : rabbit.id,
       lineage,
       queueMs,
+      queueWallMs,
       observation,
     });
     try {
       const result = await this.services.choose(group, observation, controller.signal, {
         relief: !!rulesFor(world).reliefEnabled,
         predatorPrey: world.scenario === 'predatorPrey',
+        experiments: world.experiments,
       });
       stats.inputTokens += result.inputTokens;
       stats.outputTokens += result.outputTokens;
@@ -417,44 +578,70 @@ export class SimulationRuntime {
       });
       if (group.delayMs) await this.delay(group.delayMs, controller.signal);
       const beforeEqualization = performance.now() - started;
-      let late = beforeEqualization > deadline;
-      if (config.timing === 'equalized' && !late)
+      let late = !research && beforeEqualization > deadline;
+      if (!research && config.timing === 'equalized' && !late)
         await this.delay(Math.max(0, config.equalizedMs - beforeEqualization), controller.signal);
       const effectiveMs = performance.now() - started;
-      if (config.timing === 'realtime') late = effectiveMs > deadline;
-      let outcome: DecisionTrace['state'] = 'applied';
-      if (
-        epoch !== this.epoch ||
-        !this.running ||
-        !([...world.rabbits, ...world.wolves] as (Rabbit | Wolf)[]).includes(rabbit)
-      ) {
-        stats.cancelled++;
-        outcome = 'cancelled';
-      } else if (late) {
-        stats.late++;
-        outcome = 'late';
-      } else if (
-        !('wolf' in observation
-          ? applyWolfDecision(world, rabbit as Wolf, result.decision, observation.choices)
-          : applyDecision(world, rabbit as Rabbit, result.decision, observation.choices))
-      ) {
-        stats.invalid++;
-        outcome = 'invalid';
-      } else stats.applied++;
-      publish({ state: outcome, effectiveMs });
-      this.failures[lineage] = 0;
-      this.record({
-        type: 'decision',
-        id,
-        animalId: rabbit.id,
-        species: isWolf ? 'wolf' : 'rabbit',
-        rabbitId: isWolf ? undefined : rabbit.id,
-        lineage,
-        result,
-        queueMs,
-        effectiveMs,
-        outcome,
-      });
+      if (!research && config.timing === 'realtime') late = effectiveMs > deadline;
+      const applyResult = () => {
+        let outcome: DecisionTrace['state'] = 'applied';
+        let rejectionReason: string | undefined;
+        const reject = (reason: string) => {
+          rejectionReason = reason;
+        };
+        if (
+          epoch !== this.epoch ||
+          !this.running ||
+          !([...world.rabbits, ...world.wolves] as (Rabbit | Wolf)[]).includes(rabbit)
+        ) {
+          stats.cancelled++;
+          outcome = 'cancelled';
+        } else if (late) {
+          stats.late++;
+          outcome = 'late';
+        } else if (
+          !('wolf' in observation
+            ? applyWolfDecision(world, rabbit as Wolf, result.decision, observation.choices, reject)
+            : applyDecision(world, rabbit as Rabbit, result.decision, observation.choices, reject))
+        ) {
+          stats.invalid++;
+          outcome = 'invalid';
+        } else stats.applied++;
+        publish({ state: outcome, effectiveMs, message: rejectionReason });
+        this.failures[lineage] = 0;
+        this.record({
+          type: 'decision',
+          id,
+          animalId: rabbit.id,
+          species: isWolf ? 'wolf' : 'rabbit',
+          rabbitId: isWolf ? undefined : rabbit.id,
+          lineage,
+          result,
+          queueMs,
+          queueWallMs,
+          effectiveMs,
+          outcome,
+          rejectionReason,
+        });
+      };
+      if (research && epoch === this.epoch && this.running)
+        this.researchResults.push({
+          animalId: rabbit.id,
+          apply: applyResult,
+          cancel: () => {
+            stats.cancelled++;
+            publish({ state: 'cancelled', message: 'Decision round cancelled before commit.' });
+            this.record({
+              type: 'cancelled',
+              id,
+              animalId: rabbit.id,
+              lineage,
+              usageMayBeUnreported: false,
+              reason: 'round-cancelled-before-commit',
+            });
+          },
+        });
+      else applyResult();
     } catch (error) {
       if (
         epoch !== this.epoch ||
@@ -511,6 +698,7 @@ export class SimulationRuntime {
             Math.min(30000, 1000 * 2 ** this.failures[lineage]),
           );
         if (
+          research ||
           this.failures[lineage] >= 3 ||
           (error instanceof ProviderError && [400, 401, 403, 404, 422].includes(error.status))
         )

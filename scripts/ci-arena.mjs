@@ -21,6 +21,8 @@ run([
   'tsx',
   '--test',
   'core/src/evolution/experiments.test.ts',
+  'core/src/evolution/mechanisms.test.ts',
+  'server/src/evolution/mechanismPrompts.test.ts',
   'core/src/evolution/mechanics.test.ts',
   'server/src/evolution/modular.test.ts',
   'core/src/evolution/wolves.test.ts',

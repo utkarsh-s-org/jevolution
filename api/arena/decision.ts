@@ -1,4 +1,5 @@
 import { PROVIDER_KEYS } from '../../core/src/evolution/constants.js';
+import { validateExperiments } from '../../core/src/evolution/experiments.js';
 import type { ModelGroup, ModelObservation } from '../../core/src/evolution/types.js';
 import { decryptAccountKey } from '../../server/src/evolution/accountKeyVault.js';
 import {
@@ -78,6 +79,7 @@ export default {
           apiKey,
           relief: body.options?.relief !== false,
           predatorPrey: body.options?.predatorPrey === true,
+          experiments: validateExperiments(body.options?.experiments),
         },
       );
       return json(result);
