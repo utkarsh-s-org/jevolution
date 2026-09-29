@@ -6,7 +6,7 @@ import {
   rulesFor,
 } from '../../../core/src/evolution/constants.js';
 import { type Experiments, LIFE } from '../../../core/src/evolution/experiments.js';
-import { ProviderError } from '../../../core/src/evolution/providerError.js';
+import { isCreditFailure, ProviderError } from '../../../core/src/evolution/providerError.js';
 import type {
   Decision,
   ModelGroup,
@@ -281,11 +281,14 @@ export async function choose(
         )
       : 0;
     // Provider bodies can contain echoed input or credentials; never forward them to the browser/log.
-    throw new ProviderError(
+    const error = new ProviderError(
       `${group.label} API returned HTTP ${response.status}`,
       response.status,
       retryAfterMs,
     );
+    const failure = await response.json().catch(() => null);
+    if (isCreditFailure(failure)) error.code = 'credits_exhausted';
+    throw error;
   }
   const data = (await response.json()) as {
     model?: string;

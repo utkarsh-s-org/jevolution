@@ -1,6 +1,11 @@
 // Same hosted API handlers locally; no project API keys are loaded.
 import { createServer } from 'node:http';
+
+import account from '../api/arena/account.js';
 import decision from '../api/arena/decision.js';
+import keys from '../api/arena/keys.js';
+import runs from '../api/arena/runs.js';
+import sample from '../api/arena/sample.js';
 import session from '../api/arena/session.js';
 const port = Number(process.env.ARENA_API_PORT || 4319);
 createServer(async (req, res) => {
@@ -8,18 +13,23 @@ createServer(async (req, res) => {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 128000) {
+    if (size > 4 * 1024 * 1024) {
       res.writeHead(413).end();
       return;
     }
     chunks.push(chunk);
   }
-  const handler =
-    req.url === '/api/arena/decision'
-      ? decision
-      : req.url === '/api/arena/session'
-        ? session
-        : undefined;
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  const handler = (
+    {
+      '/api/arena/account': account,
+      '/api/arena/decision': decision,
+      '/api/arena/session': session,
+      '/api/arena/keys': keys,
+      '/api/arena/runs': runs,
+      '/api/arena/sample': sample,
+    } as Record<string, typeof account>
+  )[pathname];
   if (!handler) {
     res.writeHead(404).end();
     return;

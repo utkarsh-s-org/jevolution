@@ -9,16 +9,18 @@ import type { RuntimeReplay } from '../../../core/src/evolution/runtimePorts.js'
 import type { Snapshot } from '../../../core/src/evolution/types.js';
 
 export class HostedStorage {
+  ownerId = 'unassigned';
   private database: Promise<IDBDatabase>;
   error?: string;
   private queue: Promise<void> = Promise.resolve();
   private sequence = 0;
   constructor() {
     this.database = new Promise((resolve, reject) => {
-      const request = indexedDB.open('jevolution-runs', 1);
+      const request = indexedDB.open('jevolution-runs', 2);
       request.onupgradeneeded = () => {
-        request.result.createObjectStore('chunks');
-        request.result.createObjectStore('events');
+        for (const name of ['chunks', 'events', 'outbox'])
+          if (!request.result.objectStoreNames.contains(name))
+            request.result.createObjectStore(name);
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(new Error('Browser storage unavailable.'));
@@ -31,12 +33,13 @@ export class HostedStorage {
     if (this.error) throw new Error(this.error);
     // Capture values now: the live world continues mutating while IndexedDB opens.
     const copy = structuredClone(value);
+    const scopedKey: IDBValidKey = [this.ownerId, ...(Array.isArray(key) ? key : [key])];
     this.queue = this.queue
       .then(async () => {
         const db = await this.database;
         await new Promise<void>((resolve, reject) => {
           const transaction = db.transaction(store, 'readwrite');
-          transaction.objectStore(store).put(copy, key);
+          transaction.objectStore(store).put(copy, scopedKey);
           transaction.oncomplete = () => resolve();
           transaction.onerror = () => reject(new Error('Browser storage is full or unavailable.'));
           transaction.onabort = () => reject(new Error('Browser storage write was interrupted.'));
@@ -51,9 +54,43 @@ export class HostedStorage {
     if (this.error) throw new Error(this.error);
     const db = await this.database;
     return new Promise((resolve, reject) => {
-      const request = db.transaction(store).objectStore(store).get(key);
+      const request = db
+        .transaction(store)
+        .objectStore(store)
+        .get([this.ownerId, ...(Array.isArray(key) ? key : [key])]);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(new Error('Recorded frame unavailable.'));
+    });
+  }
+  async drain() {
+    await this.queue;
+    if (this.error) throw new Error(this.error);
+  }
+  async pending(): Promise<unknown[]> {
+    await this.drain();
+    const db = await this.database;
+    return new Promise((resolve, reject) => {
+      const request = db
+        .transaction('outbox')
+        .objectStore('outbox')
+        .getAll(IDBKeyRange.bound([this.ownerId], [this.ownerId, []]));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(new Error('Local pending saves unavailable.'));
+    });
+  }
+  async removePending(runId: string, start: number, changes: number) {
+    await this.drain();
+    const db = await this.database;
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('outbox', 'readwrite');
+      const store = tx.objectStore('outbox');
+      const key = [this.ownerId, runId, start];
+      const read = store.get(key);
+      read.onsuccess = () => {
+        if (read.result?.chunk?.changes.length === changes) store.delete(key);
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(new Error('Could not confirm local save.'));
     });
   }
   record(runId: string, event: Record<string, unknown>) {
@@ -68,8 +105,14 @@ export class HostedReplay implements RuntimeReplay {
   private previous?: Snapshot;
   private storage: HostedStorage;
   private runId: string;
-  constructor(storage: HostedStorage, runId: string) {
+  private onFlush?: (runId: string, chunk: Chunk) => void;
+  constructor(
+    storage: HostedStorage,
+    runId: string,
+    onFlush?: (runId: string, chunk: Chunk) => void,
+  ) {
     this.storage = storage;
+    this.onFlush = onFlush;
     this.runId = runId;
   }
   capture(snapshot: Snapshot) {
@@ -92,8 +135,10 @@ export class HostedReplay implements RuntimeReplay {
     }
   }
   flush() {
-    if (this.current && !this.error)
+    if (this.current && !this.error) {
       this.storage.put('chunks', [this.runId, this.current.start], this.current);
+      this.onFlush?.(this.runId, structuredClone(this.current));
+    }
   }
   async get(index: number): Promise<Snapshot> {
     if (!Number.isInteger(index) || index < 0 || index >= this.frames)

@@ -45,3 +45,18 @@ export function apply(snapshot: Snapshot, patches: Patch[]) {
     else target[key] = structuredClone(value);
   }
 }
+
+export function recordedFrame(chunk: Chunk, index: number, frames: number): Snapshot {
+  if (
+    !Number.isInteger(index) ||
+    index < chunk.start ||
+    index >= chunk.start + chunk.changes.length + 1
+  )
+    throw new Error('Saved frame unavailable.');
+  const snapshot = structuredClone(chunk.base);
+  for (let i = 0; i < index - chunk.start; i++) apply(snapshot, chunk.changes[i]);
+  snapshot.status.running = false;
+  snapshot.status.replay.frames = frames;
+  snapshot.status.reason = 'Saved run. Replay does not make model calls.';
+  return snapshot;
+}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { Snapshot } from '../../../core/src/evolution/types.js';
-import { arenaRequest } from './hostedClient.js';
+import { arenaRequest, HOSTED, hostedClient } from './hostedClient.js';
 
 export function useReplay(live: Snapshot | null) {
   const [request, setRequest] = useState<{ runId: string; index: number } | null>(null);
@@ -10,8 +10,10 @@ export function useReplay(live: Snapshot | null) {
   );
   const [error, setError] = useState('');
   const generation = useRef(0);
+  const sample = HOSTED && hostedClient().sample;
   const loadFrame = useRef<((index: number) => void) | null>(null);
-  const active = request?.runId === live?.status.runId && !live?.status.running ? request : null;
+  const active =
+    !sample && request?.runId === live?.status.runId && !live?.status.running ? request : null;
   const activeIndex = active?.index;
   const activeRunId = active?.runId;
   useEffect(() => {
@@ -61,12 +63,23 @@ export function useReplay(live: Snapshot | null) {
   }, [activeIndex, activeRunId]);
   const shown = active && loaded?.runId === active.runId ? loaded.snapshot : live;
   return {
-    shown,
-    reviewing: !!active,
-    loading: !!active && (loaded?.runId !== active.runId || loaded?.index !== active.index),
-    index: active?.index ?? Math.max(0, (live?.status.replay.frames || 1) - 1),
-    error: active ? error : '',
+    shown: sample ? live : shown,
+    reviewing: sample || !!active,
+    loading: sample
+      ? hostedClient().sampleLoading
+      : !!active && (loaded?.runId !== active.runId || loaded?.index !== active.index),
+    index: sample
+      ? hostedClient().sampleIndex
+      : (active?.index ?? Math.max(0, (live?.status.replay.frames || 1) - 1)),
+    error: sample ? hostedClient().sampleError || error : active ? error : '',
     seek: (index: number) => {
+      if (sample) {
+        setError('');
+        void hostedClient()
+          .request('sampleSeek', { index })
+          .catch((e: Error) => setError(e.message));
+        return;
+      }
       if (live && !live.status.running) {
         setError('');
         setRequest({ runId: live.status.runId, index });

@@ -23,6 +23,7 @@ Use Node.js **22.12 or newer** and npm.
 git clone https://github.com/utkarshg20-org/jevolution.git
 cd jevolution
 npm install
+# Configure .env.accounts.local as described in docs/account-access.md
 npm run arena:dev:api
 ```
 
@@ -32,11 +33,15 @@ In a second terminal:
 npm run arena:dev
 ```
 
-Open **[http://127.0.0.1:5174/arena.html](http://127.0.0.1:5174/arena.html)**. Click **API keys** to enter your provider credentials. Use the gear to configure groups, environment, and timing, then reset the habitat to apply settings. Starting a run makes billable API calls on your accounts. Set request and duration limits before starting. Switching away from the tab pauses the simulation.
+Open **[http://127.0.0.1:5174/arena.html](http://127.0.0.1:5174/arena.html)**. Choose **Explore a sample** for a free interactive recording, or create an account and click **API keys** to save your provider credentials to your account. Use the gear to configure groups, environment, and timing, then reset the habitat to apply settings. Starting a run makes billable API calls on your accounts. Set request and duration limits before starting. Switching away from the tab pauses the simulation.
 
-Keys are saved in this browser's localStorage, separately from run data. Export the current run before resetting or reloading. Stop the development servers with **Ctrl+C**.
+Without account keys, the app opens a labeled, read-only sample with playback, rewind, animal inspection and analytics. Editing and live execution unlock when a personal key is saved. Provider-reported credit failures pause the live run and return to the sample.
 
-The legacy loopback server (`npm run arena:build` followed by `npm run arena`) supports private development with a Git-ignored `.env.arena`. Do not expose that server publicly; the public deployment uses the isolated BYOK endpoint instead.
+Keys are encrypted server-side and never included in run exports. Started runs save to your Supabase account; **Previous runs** opens recorded habitats and analytics without model calls. Pause and wait for **Saved to your account** before leaving. Stop the development servers with **Ctrl+C**.
+
+See [account setup and storage](docs/account-access.md) for Supabase configuration, migrations, local development and current sponsored-access status.
+
+The legacy loopback server (`npm run arena:build` followed by `npm run arena`) supports private development with a Git-ignored `.env.arena`. Do not expose that server publicly; the public deployment requires an authenticated account and uses its encrypted provider keys.
 
 ## What the comparison measures
 
