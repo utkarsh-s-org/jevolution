@@ -16,6 +16,7 @@ function run(args) {
 console.log(
   '[Deploy] Checking simulation rules, replay, provider adapters, and API access controls.',
 );
+run(['--test', 'scripts/arena-provenance.test.mjs']);
 run([
   '--import',
   'tsx',
