@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import App from './App.js';
 import { closeHostedClient, HOSTED } from './hostedClient.js';
+import { LandingClip } from './LandingClip.js';
+import { CardBody, CardContainer, CardItem } from './ThreeDCard.js';
 
 type Session = { configured: boolean; user: { id: string; email: string } | null };
 
@@ -167,23 +169,40 @@ export default function AccountGateway() {
                 </button>
                 <p className="welcome-caption">Rabbits, wolves, and a world you can change.</p>
               </div>
-              <div className="welcome-world" aria-label="Illustrated pixel habitat">
-                {Array.from({ length: 64 }, (_, i) => (
-                  <span
-                    key={i}
-                    className={
-                      i % 8 === 4 || (i % 8 === 5 && i > 30)
-                        ? 'water'
-                        : (i * 7) % 11 < 3
-                          ? 'grass'
-                          : ''
-                    }
-                  >
-                    {[9, 18, 39, 46, 54].includes(i) && <img src="/favicon.png" alt="" />}
-                  </span>
-                ))}
-                <div className="welcome-world-caption">Build. Observe. Experiment.</div>
-              </div>
+              <CardContainer className="welcome-card">
+                <CardBody>
+                  <CardItem translateZ={50} className="card3d-title">
+                    Watch a living ecosystem
+                  </CardItem>
+                  <CardItem as="p" translateZ={60} className="card3d-text">
+                    Every rabbit and wolf is its own Jev agent. Hover to step inside the habitat.
+                  </CardItem>
+                  <CardItem translateZ={100} className="card3d-media">
+                    <LandingClip />
+                  </CardItem>
+                  <div className="card3d-actions">
+                    <CardItem
+                      translateZ={20}
+                      as="button"
+                      className="card3d-link"
+                      onClick={() => navigate('sample')}
+                    >
+                      Try now →
+                    </CardItem>
+                    <CardItem
+                      translateZ={20}
+                      as="button"
+                      className="primary-button"
+                      onClick={() => {
+                        setMode('signup');
+                        navigate('account');
+                      }}
+                    >
+                      Sign up
+                    </CardItem>
+                  </div>
+                </CardBody>
+              </CardContainer>
             </section>
             <section className="welcome-features" aria-label="What you can explore">
               <article>

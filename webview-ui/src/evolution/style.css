@@ -3798,3 +3798,81 @@ select {
   line-height: 1.5;
   margin: -6px 0 14px;
 }
+/* Landing 3D card: tilts on hover; layers lift by translateZ. */
+.card3d-container {
+  display: flex;
+  justify-content: center;
+  perspective: 1000px;
+}
+.card3d-inner {
+  transform-style: preserve-3d;
+  transition: transform 0.2s linear;
+}
+.card3d-body {
+  transform-style: preserve-3d;
+  width: min(30rem, 100%);
+  padding: 24px;
+  background: #121a16;
+  border: 2px solid #293b26;
+  box-shadow: 12px 12px 0 #0b110d;
+}
+.card3d-body > *,
+.card3d-actions > * {
+  transform-style: preserve-3d;
+}
+.card3d-item {
+  transition: transform 0.2s linear;
+}
+.card3d-title {
+  font-size: 20px;
+  color: var(--white);
+}
+.card3d-text {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 24rem;
+}
+.card3d-media {
+  margin-top: 18px;
+}
+.landing-clip {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border: 2px solid #293b26;
+  background: #0b110d;
+  overflow: hidden;
+}
+.landing-clip canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.landing-clip p {
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+}
+.landing-clip-badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 3px 7px;
+  background: #0b110dcc;
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.card3d-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 28px;
+}
+.card3d-link {
+  padding: 8px 4px;
+  color: var(--white);
+  font-size: 13px;
+}
