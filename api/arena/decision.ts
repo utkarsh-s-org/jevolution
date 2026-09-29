@@ -1,14 +1,16 @@
 import { validateExperiments } from '../../core/src/evolution/experiments.js';
 import { PROVIDER_KEYS } from '../../core/src/evolution/constants.js';
 import type { ModelGroup, ModelObservation } from '../../core/src/evolution/types.js';
-import { authenticated, json, sameOrigin } from '../../server/src/evolution/hostedAuth.js';
+import { json, sameOrigin } from '../../server/src/evolution/hostedAuth.js';
 import { choose, ProviderError } from '../../server/src/evolution/models.js';
 
 export default {
   async fetch(request: Request) {
     if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-    if (!sameOrigin(request) || !authenticated(request))
-      return json({ error: 'Enter the run password to unlock the simulation.' }, 401);
+    if (!sameOrigin(request)) return json({ error: 'Cross-origin access is disabled' }, 403);
+    const apiKey = request.headers.get('x-provider-key')?.trim();
+    if (!apiKey || apiKey.length > 4096 || /[^\x21-\x7e]/.test(apiKey))
+      return json({ error: 'Enter your own provider API key in API keys.' }, 401);
     if (!request.headers.get('content-type')?.startsWith('application/json'))
       return json({ error: 'JSON required' }, 415);
     const text = await request.text();
@@ -53,6 +55,7 @@ export default {
         observation,
         AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
         {
+          apiKey,
           relief: body.options?.relief !== false,
           predatorPrey: body.options?.predatorPrey === true,
           experiments: validateExperiments(body.options?.experiments),
@@ -63,10 +66,10 @@ export default {
       if (error instanceof ProviderError)
         return json(
           {
-            error: error.message,
+            error: 'Provider request failed. Check your key, model access, and quota.',
             status: error.status,
             retryAfterMs: error.retryAfterMs,
-            nativeResponse: error.nativeResponse,
+
             latencyMs: error.latencyMs,
           },
           502,

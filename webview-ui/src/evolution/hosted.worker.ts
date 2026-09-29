@@ -1,7 +1,7 @@
 import { DEFAULT_GROUPS, DEFAULT_SEED, RULES } from '../../../core/src/evolution/constants.js';
 import { ProviderError } from '../../../core/src/evolution/providerError.js';
 import { SimulationRuntime } from '../../../core/src/evolution/runtime.js';
-import type { ModelGroup, Provider, Result, RunConfig } from '../../../core/src/evolution/types.js';
+import type { Provider, Result, RunConfig } from '../../../core/src/evolution/types.js';
 import { HostedReplay, HostedStorage } from './hostedReplay.js';
 
 let ready: Record<Provider, boolean> = {
@@ -10,8 +10,9 @@ let ready: Record<Provider, boolean> = {
   openai: false,
   google: false,
 };
-let groups = DEFAULT_GROUPS;
+const groups = DEFAULT_GROUPS;
 let authenticated = false;
+let keys: Partial<Record<Provider, string>> = {};
 let initialized = false;
 const storage = new HostedStorage();
 const runtime = new SimulationRuntime({
@@ -28,15 +29,15 @@ const runtime = new SimulationRuntime({
       method: 'POST',
       credentials: 'same-origin',
       signal,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-provider-key': keys[group.provider] || '' },
       body: JSON.stringify({ group, observation, options }),
     });
     const data = await response.json();
     if (!response.ok) {
-      if (response.status === 401) {
-        runtime.pause('Session expired. Enter the run password again.');
-        authenticated = false;
-        ready = { typesafe: false, anthropic: false, openai: false, google: false };
+      if ([401, 403].includes(data.status || response.status)) {
+        runtime.pause('Provider key missing or invalid. Update API keys.');
+        ready[group.provider] = false;
+        authenticated = Object.values(ready).some(Boolean);
       }
       const error = new ProviderError(
         data.error || 'Model request failed',
@@ -51,36 +52,27 @@ const runtime = new SimulationRuntime({
   },
 });
 const send = () => postMessage({ type: 'snapshot', snapshot: runtime.snapshot(), authenticated });
-async function refresh() {
-  const response = await fetch('/api/arena/session', { credentials: 'same-origin' });
-  if (!response.ok) throw new Error('Could not connect to the model server.');
-  const session = (await response.json()) as {
-    authenticated: boolean;
-    ready: typeof ready;
-    groups: ModelGroup[];
-  };
-  authenticated = session.authenticated;
-  if (!authenticated && runtime.running) runtime.pause('Simulation locked.');
-  ready = session.authenticated
-    ? session.ready
-    : { typesafe: false, anthropic: false, openai: false, google: false };
-  groups = session.groups;
+async function refresh(input: Partial<Record<Provider, string>> = keys) {
+  if (runtime.running) runtime.pause('API keys updated.');
+  keys = input;
+  ready = Object.fromEntries(
+    Object.keys(ready).map((p) => [p, !!keys[p as Provider]]),
+  ) as typeof ready;
+  authenticated = Object.values(ready).some(Boolean);
   if (!initialized) {
     runtime.reset(DEFAULT_SEED, runtime.config, groups);
     initialized = true;
   }
-  runtime.reason = authenticated
-    ? 'Ready. Start to run real model decisions.'
-    : 'Public demo. Enter the run password to start model calls.';
+  runtime.reason = 'Add your API keys, configure the habitat, then start.';
   send();
 }
 onmessage = async (event: MessageEvent) => {
   const { id, action, data = {} } = event.data;
   try {
     let result: unknown;
-    if (action === 'refresh') await refresh();
+    if (action === 'refresh') await refresh(data.keys);
     else if (action === 'start') {
-      if (!authenticated) throw new Error('Unlock the simulation first.');
+      if (!authenticated) throw new Error('Add your API keys first.');
       runtime.start();
     } else if (action === 'pause') runtime.pause(data.reason);
     else if (action === 'drought') runtime.drought();

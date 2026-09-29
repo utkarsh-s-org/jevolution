@@ -141,16 +141,22 @@ export async function choose(
   {
     relief = true,
     predatorPrey = false,
+    apiKey,
     experiments,
-  }: { relief?: boolean; predatorPrey?: boolean; experiments?: Experiments } = {},
+  }: { relief?: boolean; predatorPrey?: boolean; experiments?: Experiments; apiKey?: string } = {},
 ): Promise<Result> {
   if (group.controller === 'deterministic')
     throw new ProviderError('Deterministic wolves do not use a model API');
-  const instructions = instructionsFor('wolf' in observation, {
+  const baseInstructions = instructionsFor('wolf' in observation, {
     relief,
     predatorPrey,
     experiments,
   });
+  const instructions =
+    baseInstructions +
+    (observation.experiment
+      ? ' The observation includes active experiment settings that override baseline numbers above: wolfVision is sight in tiles; wolfSpeed and foodRegrowth are percentages of baseline; signalRange is maximum range scaled by sociability; signalDelay is milliseconds; messageLoss is percent lost. Temperature below 20 C raises base metabolism 2% per degree; above 20 C raises rabbit thirst 4% per degree; food growth falls 2.5% per degree away from 20 C, floored at 10%. These settings are shared by all providers.'
+      : '');
   // "Need food" is offered only to a rabbit that is actually hungry, and only with relief on.
   const hungry =
     relief && 'rabbit' in observation && observation.rabbit.energy < RULES.hungryEnergy;
@@ -194,7 +200,7 @@ export async function choose(
   };
   const description = 'Choose one supplied legal action ID and one optional local signal.';
   const headers: Record<string, string> = { 'content-type': 'application/json' };
-  const key = process.env[PROVIDER_KEYS[provider]];
+  const key = apiKey ?? process.env[PROVIDER_KEYS[provider]];
   if (!key) throw new ProviderError(`Missing ${PROVIDER_KEYS[provider]}`, 401);
   let url: string;
   let body: object;

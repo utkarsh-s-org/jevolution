@@ -195,6 +195,7 @@ export interface Candidate {
   cacheId?: number;
 }
 export interface Observation {
+  experiment?: import('./experimentPreview.js').ExperimentPreview['values'];
   caches: FoodCache[];
   rabbit: {
     sex?: 'female' | 'male';
@@ -236,6 +237,7 @@ export interface WolfCandidate {
   mateId?: number;
 }
 export interface WolfObservation {
+  experiment?: import('./experimentPreview.js').ExperimentPreview['values'];
   signals?: { id?: string; sender: number; kind: Signal; position: Point; age: number }[];
   wolf: {
     sex?: 'female' | 'male';
@@ -367,6 +369,9 @@ export interface World {
   history: HistoryPoint[];
   nextId: number;
   eventId: number;
+  experiment?: import('./experimentPreview.js').ExperimentPreview;
+  nextDrought?: number;
+  droughtTiles?: number[];
   droughtUntil: number;
   lastSample: number;
   caches: FoodCache[];

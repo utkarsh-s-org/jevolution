@@ -266,7 +266,9 @@ export const PREDATOR_PREY_RULES: Rules = {
   // small predator–prey systems collapse (Gause 1934, Huffaker 1958).
   migrationInterval: 20,
 };
-export function rulesFor(world: Pick<World, 'scenario' | 'experiments'> | undefined): Rules {
+export function rulesFor(
+  world: (Pick<World, 'scenario'> & Partial<Pick<World, 'experiment' | 'experiments'>>) | undefined,
+): Rules {
   let base = world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
   if (world?.experiments?.resources)
     base = {
@@ -277,22 +279,49 @@ export function rulesFor(world: Pick<World, 'scenario' | 'experiments'> | undefi
       droughtWither: 0.08,
       wolfMealEnergy: 0,
     };
-  if (!world?.experiments?.demographics) return base;
+  if (world?.experiments?.demographics)
+    base = {
+      ...base,
+      rabbitSoloBirths: 0,
+      wolfSoloPups: 0,
+      maturity: 24,
+      wolfMaturity: 45,
+      lifespan: 480,
+      wolfLifespan: 720,
+      breedEnergy: 60,
+      preyMateDistance: 1.7,
+      wolfPairDistance: 1.7,
+      rabbitCapacity: 0,
+      localCapacity: 12,
+      localCrowdRadius: 4,
+      migrationInterval: 0,
+    };
+  const e = world?.experiment;
+  if (!e?.appliedToSimulation || e.mode !== 'active') return base;
+  const v = e.values;
+  const cold = 1 + Math.max(0, 20 - v.temperature) * 0.02;
+  const heat = 1 + Math.max(0, v.temperature - 20) * 0.04;
+  const growth = Math.max(0.1, 1 - Math.abs(v.temperature - 20) * 0.025);
+  const growthScale = (v.foodRegrowth / 100) * growth;
+  const droughtStrength = v.disasterSeverity / 100;
+  // Interpolate through the preset, so 100% preserves both of its drought rules.
+  const droughtRegrowth =
+    droughtStrength <= 1
+      ? base.droughtRegrowth + (base.foodRegrowth - base.droughtRegrowth) * (1 - droughtStrength)
+      : base.droughtRegrowth * Math.max(0, 2 - droughtStrength);
   return {
     ...base,
-    rabbitSoloBirths: 0,
-    wolfSoloPups: 0,
-    maturity: 24,
-    wolfMaturity: 45,
-    lifespan: 480,
-    wolfLifespan: 720,
-    breedEnergy: 60,
-    preyMateDistance: 1.7,
-    wolfPairDistance: 1.7,
-    rabbitCapacity: 0,
-    localCapacity: 12,
-    localCrowdRadius: 4,
-    migrationInterval: 0,
+    baseMetabolism: base.baseMetabolism * cold,
+    wolfMetabolism: base.wolfMetabolism * cold,
+    thirst: base.thirst * heat,
+    droughtThirst: base.droughtThirst * heat,
+    foodRegrowth: base.foodRegrowth * growthScale,
+    droughtRegrowth: droughtRegrowth * growthScale,
+    droughtWither: base.droughtWither * droughtStrength,
+    wolfSpeed: base.wolfSpeed * (v.wolfSpeed / 100),
+    wolfSight: v.wolfVision,
+    signalDelay: v.signalDelay / 1000,
+    signalCost: v.signalCost,
   };
 }
 export const PREDATOR_PREY_BUDGET: Record<Species, number> = { rabbit: 80, wolf: 20 };

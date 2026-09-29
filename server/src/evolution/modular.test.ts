@@ -10,12 +10,15 @@ import {
   DEFAULT_GROUPS,
   MODEL_PRESETS,
   PROVIDER_KEYS,
+  rulesFor,
+  SCENARIO_CONFIG,
   validateGroups,
 } from '../../../core/src/evolution/constants.js';
 import {
   defaultExperimentPreview,
   validateExperimentPreview,
 } from '../../../core/src/evolution/experimentPreview.js';
+import { BASELINE_EXPERIMENTS } from '../../../core/src/evolution/experiments.js';
 import { applyDecision, observe, stepWorld } from '../../../core/src/evolution/simulation.js';
 import type { ModelGroup, Provider, Snapshot } from '../../../core/src/evolution/types.js';
 import { createWorld } from '../../../core/src/evolution/world.js';
@@ -31,6 +34,32 @@ function roster(n: number): ModelGroup[] {
     delayMs: 0,
   }));
 }
+test('resetting untouched settings or changing only timing preserves either scenario baseline', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-baseline-'));
+  const runtime = new ArenaRuntime(directory);
+  try {
+    for (const scenario of ['arena', 'predatorPrey'] as const) {
+      const config = { ...SCENARIO_CONFIG[scenario] };
+      const groups = DEFAULT_GROUPS.map((g) => ({
+        ...g,
+        population: g.species === 'wolf' ? 6 : g.population,
+      }));
+      runtime.reset(123, config, groups);
+      const baseline = structuredClone(runtime.world);
+      runtime.reset(123, { ...config, deadlineMs: 1500 }, groups);
+      assert.deepEqual(runtime.world, baseline);
+      const experimentPreview = defaultExperimentPreview(scenario, runtime.world.groups);
+      // Living population must not become the starting population when settings are opened.
+      runtime.world.wolves.splice(0, 2);
+      runtime.reset(123, { ...config, experimentPreview }, groups);
+      assert.deepEqual({ ...runtime.world, experiment: undefined }, baseline);
+      assert.deepEqual(rulesFor(runtime.world), rulesFor(baseline));
+    }
+  } finally {
+    runtime.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 test('preview controls survive snapshots and replay without changing the seeded world or observations', () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-preview-'));
   const runtime = new ArenaRuntime(directory);
@@ -38,11 +67,15 @@ test('preview controls survive snapshots and replay without changing the seeded 
     runtime.reset(123, { ...DEFAULT_CONFIG });
     const baseline = structuredClone(runtime.world);
     const observation = observe(runtime.world, runtime.world.rabbits[0]);
-    const preview = defaultExperimentPreview();
+    const preview = {
+      ...defaultExperimentPreview(),
+      mode: 'preview-only' as const,
+      appliedToSimulation: false,
+    };
     preview.values.temperature = 40;
     preview.values.messageLoss = 95;
     runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: preview });
-    assert.deepEqual(runtime.world, baseline);
+    assert.deepEqual({ ...runtime.world, experiment: undefined }, baseline);
     assert.deepEqual(observe(runtime.world, runtime.world.rabbits[0]), observation);
     assert.deepEqual(runtime.snapshot().status.config.experimentPreview, preview);
     assert.deepEqual(runtime.replay.get(0).status.config.experimentPreview, preview);
@@ -456,5 +489,58 @@ test("a provider's long Retry-After pauses a group for at most a few seconds", a
     if (saved === undefined) delete process.env[key];
     else process.env[key] = saved;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('active settings set wolf counts and persist effective metadata in replay', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-active-'));
+  const runtime = new ArenaRuntime(directory);
+  try {
+    const settings = defaultExperimentPreview();
+    settings.values.wolfCount = 20;
+    settings.values.temperature = 40;
+    runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: settings });
+    assert.equal(runtime.world.wolves.length, 20);
+    assert.deepEqual(runtime.replay.get(0).status.config.experimentPreview, settings);
+    settings.values.wolfCount = 0;
+    runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: settings });
+    assert.equal(runtime.world.wolves.length, 0);
+  } finally {
+    runtime.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('reset preserves environmental controls and mechanism switches together in the world and replay', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-combined-'));
+  const runtime = new ArenaRuntime(directory);
+  try {
+    const experimentPreview = defaultExperimentPreview('predatorPrey');
+    experimentPreview.values.wolfCount = 12;
+    experimentPreview.values.temperature = 40;
+    const experiments = {
+      ...BASELINE_EXPERIMENTS,
+      resources: true,
+      demographics: true,
+      researchClock: true,
+    };
+    runtime.reset(123, { ...SCENARIO_CONFIG.predatorPrey, experimentPreview, experiments });
+    assert.equal(runtime.world.wolves.length, 12);
+    assert.ok(runtime.world.rabbits.every((rabbit) => rabbit.life));
+    assert.ok(runtime.world.wolves.every((wolf) => wolf.life && wolf.water === 80));
+    const rules = rulesFor(runtime.world);
+    assert.equal(rules.wolfMealEnergy, 0);
+    assert.equal(rules.migrationInterval, 0);
+    assert.ok(rules.thirst > rulesFor({ scenario: 'predatorPrey', experiments }).thirst);
+    const recorded = runtime.replay.get(0);
+    for (const snapshot of [runtime.snapshot(), recorded]) {
+      assert.deepEqual(snapshot.world.experiment, experimentPreview);
+      assert.deepEqual(snapshot.world.experiments, experiments);
+      assert.deepEqual(snapshot.status.config.experimentPreview, experimentPreview);
+      assert.deepEqual(snapshot.status.config.experiments, experiments);
+    }
+  } finally {
+    runtime.dispose();
+    rmSync(directory, { recursive: true, force: true });
   }
 });

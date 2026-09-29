@@ -409,10 +409,14 @@ export function createWorld(
   seed = DEFAULT_SEED,
   roster: ModelGroup[] = DEFAULT_GROUPS,
   scenario: Scenario = 'arena',
+  experiment?: World['experiment'],
 ): World {
   const predatorPrey = scenario === 'predatorPrey';
   const rules = rulesFor({ scenario });
-  const groups = validateGroups(roster, predatorPrey ? PREDATOR_PREY_BUDGET : undefined);
+  const groups = validateGroups(
+    roster,
+    predatorPrey || experiment?.appliedToSimulation ? PREDATOR_PREY_BUDGET : undefined,
+  );
   const rabbitGroups = groups.filter((g) => g.species === 'rabbit');
   const wolfGroups = groups.filter((g) => g.species === 'wolf');
   const founders = Math.max(...rabbitGroups.map((g) => g.population!));
@@ -420,6 +424,11 @@ export function createWorld(
   const world: World = {
     ...(predatorPrey ? { scenario } : {}),
     groups,
+    experiment,
+    nextDrought:
+      experiment?.appliedToSimulation && experiment.values.disasterFrequency > 0
+        ? 3600 / experiment.values.disasterFrequency
+        : undefined,
     seed,
     rng: seed >>> 0 || 1,
     time: 0,
@@ -455,6 +464,12 @@ export function createWorld(
     wolfPositions.push(p);
     if (wolfPositions.length === wolfCount) break;
   }
+  if (wolfPositions.length < wolfCount) {
+    for (const tile of grass) {
+      if (wolfPositions.length >= wolfCount) break;
+      if (!wolfPositions.some((p) => p.x === tile.x && p.y === tile.y)) wolfPositions.push(tile);
+    }
+  }
   const positions = shuffle(
     world,
     grass.filter((p) => wolfPositions.every((w) => distance(w, p) >= rules.wolfClearance)),
@@ -481,6 +496,38 @@ export function createWorld(
       world.wolves.push(wolf);
     }
   populateFood(world);
+  if (experiment?.appliedToSimulation) {
+    const v = experiment.values;
+    if (v.foodClustering !== 50 || v.foodAbundance !== 100) {
+      // Blend clustered fields with a uniform supply while preserving total capacity.
+      const land = world.tiles.filter((t) => t.kind === 'grass' || t.kind === 'forest');
+      const mean = land.reduce((n, t) => n + t.foodCapacity, 0) / land.length;
+      const fill = land.map((tile) => (tile.foodCapacity ? tile.food / tile.foodCapacity : 0.8));
+      for (const tile of land) {
+        const original = tile.foodCapacity;
+        const clustering = v.foodClustering / 100;
+        const capacity =
+          clustering <= 0.5
+            ? mean * (1 - clustering * 2) + original * clustering * 2
+            : original *
+              (original >= mean ? 1 + (clustering - 0.5) * 2 : 1 - (clustering - 0.5) * 2);
+        tile.foodCapacity = capacity;
+      }
+      const total = land.reduce((n, t) => n + t.foodCapacity, 0);
+      const scale = total ? (((mean * land.length) / total) * v.foodAbundance) / 100 : 0;
+      for (const [index, tile] of land.entries()) {
+        tile.foodCapacity *= scale;
+        tile.food = tile.foodCapacity * fill[index];
+      }
+    }
+    if (v.traitDiversity !== 50)
+      for (const rabbit of world.rabbits)
+        for (const key of GENE_NAMES)
+          rabbit.genes[key] = Math.max(
+            0.05,
+            Math.min(0.95, 0.5 + ((rabbit.genes[key] - 0.5) * v.traitDiversity) / 50),
+          );
+  }
   world.history.push({
     time: 0,
     populations: Object.fromEntries(groups.map((g) => [g.id, g.population!])),

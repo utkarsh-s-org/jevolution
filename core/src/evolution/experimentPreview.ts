@@ -1,4 +1,7 @@
-// UI experiment design metadata only. These values never change simulation rules.
+import { DEFAULT_GROUPS, PREDATOR_PREY_GROUPS, rulesFor } from './constants.js';
+import type { ModelGroup, Scenario } from './types.js';
+
+// Legacy preview records remain unapplied. Active defaults preserve the selected preset.
 export const EXPERIMENT_GROUPS = [
   {
     name: 'Communication',
@@ -9,9 +12,9 @@ export const EXPERIMENT_GROUPS = [
         min: 1,
         max: 30,
         step: 1,
-        initial: 10,
+        initial: 8,
         unit: 'tiles',
-        help: 'How far a message could travel.',
+        help: 'Maximum range; sociability scales range from 37.5% to 100%.',
       },
       {
         key: 'signalDelay',
@@ -19,7 +22,7 @@ export const EXPERIMENT_GROUPS = [
         min: 0,
         max: 5000,
         step: 100,
-        initial: 0,
+        initial: 200,
         unit: 'ms',
         help: 'Time between sending and receiving.',
       },
@@ -38,10 +41,10 @@ export const EXPERIMENT_GROUPS = [
         label: 'Signal energy cost',
         min: 0,
         max: 10,
-        step: 0.5,
-        initial: 1,
+        step: 0.1,
+        initial: 0.6,
         unit: 'energy',
-        help: 'Energy spent on each message.',
+        help: 'Base energy per message, multiplied by 1 + sociability.',
       },
     ],
   },
@@ -91,7 +94,7 @@ export const EXPERIMENT_GROUPS = [
         step: 1,
         initial: 20,
         unit: '°C',
-        help: 'Ambient temperature. Biological effects are not modeled yet.',
+        help: 'Toy model: cold raises metabolism; heat raises thirst; extremes slow food growth.',
       },
       {
         key: 'disasterFrequency',
@@ -101,17 +104,17 @@ export const EXPERIMENT_GROUPS = [
         step: 1,
         initial: 0,
         unit: '/hour',
-        help: 'Planned events per simulation hour. Zero means none.',
+        help: 'Regular 60-second droughts per simulation hour. Zero disables automatic droughts.',
       },
       {
         key: 'disasterSeverity',
-        label: 'Drought severity',
+        label: 'Drought strength',
         min: 0,
-        max: 100,
+        max: 200,
         step: 5,
-        initial: 50,
+        initial: 100,
         unit: '%',
-        help: 'Planned reduction in food growth during a drought.',
+        help: '100% keeps the scenario’s drought. 0% removes growth loss and withering; 200% stops regrowth and doubles withering.',
       },
       {
         key: 'disasterArea',
@@ -132,11 +135,11 @@ export const EXPERIMENT_GROUPS = [
         key: 'wolfCount',
         label: 'Wolf count',
         min: 0,
-        max: 50,
+        max: 20,
         step: 1,
         initial: 10,
         unit: 'wolves',
-        help: 'Planned count only. Active counts remain in Animal groups.',
+        help: 'Starting wolves, distributed across configured wolf groups.',
       },
       {
         key: 'wolfSpeed',
@@ -189,26 +192,45 @@ export const EXPERIMENT_GROUPS = [
 
 export type ExperimentKey = (typeof EXPERIMENT_GROUPS)[number]['controls'][number]['key'];
 export interface ExperimentPreview {
-  mode: 'preview-only';
-  appliedToSimulation: false;
+  mode: 'active' | 'preview-only';
+  appliedToSimulation: boolean;
   values: Record<ExperimentKey, number>;
 }
-export function defaultExperimentPreview(): ExperimentPreview {
+export function defaultExperimentPreview(
+  scenario: Scenario = 'arena',
+  groups: readonly ModelGroup[] = scenario === 'predatorPrey'
+    ? PREDATOR_PREY_GROUPS
+    : DEFAULT_GROUPS,
+): ExperimentPreview {
   return {
-    mode: 'preview-only',
-    appliedToSimulation: false,
-    values: Object.fromEntries(
-      EXPERIMENT_GROUPS.flatMap((g) => g.controls.map((c) => [c.key, c.initial])),
-    ) as Record<ExperimentKey, number>,
+    mode: 'active',
+    appliedToSimulation: true,
+    values: {
+      ...(Object.fromEntries(
+        EXPERIMENT_GROUPS.flatMap((g) => g.controls.map((c) => [c.key, c.initial])),
+      ) as Record<ExperimentKey, number>),
+      wolfVision: rulesFor({ scenario }).wolfSight,
+      wolfCount: groups
+        .filter((g) => g.species === 'wolf')
+        .reduce((n, g) => n + (g.population || 0), 0),
+    },
   };
 }
 export function validateExperimentPreview(input: unknown): ExperimentPreview | undefined {
   if (input === undefined) return undefined;
   if (!input || typeof input !== 'object') throw new Error('Invalid experiment preview.');
   const data = input as Partial<ExperimentPreview>;
-  if (data.mode !== 'preview-only' || data.appliedToSimulation !== false || !data.values)
-    throw new Error('Experiment controls must be marked preview-only.');
-  const result = defaultExperimentPreview();
+  if (
+    !['active', 'preview-only'].includes(data.mode || '') ||
+    data.appliedToSimulation !== (data.mode === 'active') ||
+    !data.values
+  )
+    throw new Error('Invalid experiment mode.');
+  const result = {
+    ...defaultExperimentPreview(),
+    mode: data.mode!,
+    appliedToSimulation: data.appliedToSimulation!,
+  };
   for (const group of EXPERIMENT_GROUPS)
     for (const c of group.controls) {
       const value = data.values[c.key];

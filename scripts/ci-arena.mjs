@@ -6,16 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
 
-// Fail before replacing the working site if its server credentials are missing.
-// Local checks use mocked provider transports and need no real credentials.
-if (process.env.VERCEL === '1') {
-  for (const name of ['TYPESAFE_API_KEY', 'ANTHROPIC_API_KEY', 'ARENA_ACCESS_CODE']) {
-    if (!process.env[name]?.trim()) throw new Error(`Missing server environment variable: ${name}`);
-  }
-  if (process.env.ARENA_ACCESS_CODE.length < 24)
-    throw new Error('ARENA_ACCESS_CODE must contain at least 24 characters.');
-}
-
+// Public runs use visitor credentials, never project-funded keys.
 function run(args) {
   const result = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit' });
   if (result.error) throw result.error;
@@ -29,6 +20,9 @@ run([
   '--import',
   'tsx',
   '--test',
+  'core/src/evolution/experiments.test.ts',
+  'core/src/evolution/mechanisms.test.ts',
+  'server/src/evolution/mechanismPrompts.test.ts',
   'core/src/evolution/mechanics.test.ts',
   'server/src/evolution/modular.test.ts',
   'core/src/evolution/wolves.test.ts',

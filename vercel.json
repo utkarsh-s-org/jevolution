@@ -5,12 +5,33 @@
   "buildCommand": "npm run arena:deploy:build",
   "outputDirectory": "dist/arena",
   "functions": {
-    "api/arena/*.ts": { "maxDuration": 30 }
+    "api/arena/*.ts": {
+      "maxDuration": 30
+    }
   },
   "git": {
     "deploymentEnabled": {
       "**": false,
       "main": true
     }
-  }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+        }
+      ]
+    }
+  ]
 }

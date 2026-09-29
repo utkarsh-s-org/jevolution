@@ -20,39 +20,23 @@ jevolution makes Jev and other models' behavior observable: select an animal to 
 Use Node.js **22.12 or newer** and npm.
 
 ```bash
-git clone https://github.com/xrhuang10/jevolution.git
+git clone https://github.com/utkarshg20-org/jevolution.git
 cd jevolution
 npm install
-cp arena.env.example .env.arena
+npm run arena:dev:api
 ```
 
-Fill in `.env.arena` with keys for the providers you intend to use:
-
-| Provider           | Environment variable |
-| ------------------ | -------------------- |
-| Jev                | `TYPESAFE_API_KEY`   |
-| Anthropic / Claude | `ANTHROPIC_API_KEY`  |
-| OpenAI             | `OPENAI_API_KEY`     |
-| Google / Gemini    | `GEMINI_API_KEY`     |
-
-The default rabbit groups use Jev and Claude. Other keys are only needed when selecting those providers. The example file also contains default model IDs; provider-specific model presets are available in Settings.
+In a second terminal:
 
 ```bash
-npm run arena:build
-npm run arena
+npm run arena:dev
 ```
 
-Open **[http://127.0.0.1:4317](http://127.0.0.1:4317)**. Use the gear to configure groups and timing, then start the ecosystem. Settings for a new run take effect when you reset the habitat.
+Open **[http://127.0.0.1:5174/arena.html](http://127.0.0.1:5174/arena.html)**. Click **API keys** to enter your provider credentials. Use the gear to configure groups, environment, and timing, then reset the habitat to apply settings. Starting a run makes billable API calls on your accounts. Set request and duration limits before starting. Switching away from the tab pauses the simulation.
 
-Keys stay on the server, and `.env.arena` is ignored by Git. Starting a model-controlled simulation makes real API calls using your accounts. Configure the request and duration limits in Settings; pause to stop new decisions. The runtime also pauses when its last viewer disconnects.
+Keys are saved in this browser's localStorage, separately from run data. Export the current run before resetting or reloading. Stop the development servers with **Ctrl+C**.
 
-To use another port:
-
-```bash
-ARENA_PORT=4318 npm run arena
-```
-
-Stop the server with **Ctrl+C**. After changing source files, rebuild and restart to load the new code. Export the current run before resetting or restarting; the browser's rewind controls operate on the current run, not an automatic session restore.
+The legacy loopback server (`npm run arena:build` followed by `npm run arena`) supports private development with a Git-ignored `.env.arena`. Do not expose that server publicly; the public deployment uses the isolated BYOK endpoint instead.
 
 ## What the comparison measures
 
@@ -93,25 +77,38 @@ npm run arena:ui
 
 The browser suite uses deterministic fixtures and does not call model providers. To use an installed Google Chrome instead of Playwright's Chromium, run `ARENA_BROWSER_CHANNEL=chrome npm run arena:ui`.
 
-If Start reports missing keys, check that `.env.arena` is beside `package.json` and covers every model provider in the selected roster. If the UI appears stale after a change, rebuild and refresh the browser.
+If Start reports missing keys, open API keys and add a key for each model provider in the selected roster. If the UI appears stale after a change, rebuild and refresh the browser.
 
 ## License
 
 [MIT](LICENSE). See the repository's license and asset notices for applicable terms.
 
-## Hosted run password
+## Public runs: bring your own keys
 
-The public site can be explored without signing in. Start and Unlock ask for a shared
-password before hosted model calls are allowed. Set `ARENA_ACCESS_CODE` to at least
-24 random characters in the Vercel project's Production and Preview environments.
-Keep it server-only, outside Git, and never prefix it with `VITE_`.
+Use **API keys** in the header to save provider keys on your device. No password or owner-funded API key is used by the hosted endpoint. Every model request requires the visitor's key. Keys stay out of run configuration, replay, exports, and server logs. **Forget keys** removes browser storage and pauses the worker. Saving keys also pauses active runs.
 
-The server verifies the password and every model request. Successful login creates a
-one-hour signed, HttpOnly, Secure, SameSite=Strict cookie. Lock pauses this browser's
-simulation and clears its cookie. Expired sessions pause on their next model request.
-Changing the secret and redeploying invalidates all existing sessions. Share the
-password only with people allowed to spend the configured API credits.
+Device storage is localStorage, not an encrypted vault: scripts executing on this origin can access it. Use restricted provider keys and provider spending limits. Keys travel over HTTPS through our server for each provider request and are not persisted there. Only the selected provider key is transmitted, in a request header. Never add third-party scripts to this origin without reviewing their access to keys.
 
-This is shared-password access control, not per-user billing or a global spending cap.
-Local `npm run arena` remains a loopback development server using your local keys;
-it does not use hosted password authentication.
+To run the public BYOK interface locally, run these in separate terminals:
+
+```sh
+npm run arena:dev:api
+npm run arena:dev
+```
+
+Open http://127.0.0.1:5174/arena.html. The existing local server command above remains available for private development; it must not be exposed publicly.
+
+## Active experiment controls
+
+All experiment controls apply when resetting the habitat and are included in exported configuration. Legacy records marked preview-only retain their original, unapplied meaning.
+
+Opening settings does not activate experiment overrides. Untouched controls and changes to timing alone preserve the selected scenario's rules, starting populations, seeded food, and random sequence. Experiment defaults use that scenario's wolf vision and configured starting roster. Switching scenarios resets experiment overrides to the new preset.
+
+- Communication: sociability scales the selected maximum range from 37.5% to 100%. Delay is simulation milliseconds; message loss is a seeded draw per emission. Cost is the selected base times (1 + sociability). Lost messages still cost energy. Signal lifetime begins at delivery.
+- Resources: abundance scales capacity and initial food. Clustering blends uniform supply with generated patches, preserving total capacity. Regrowth scales replenishment independently.
+- Temperature: an illustrative model with a 20 C reference. Each degree colder increases base rabbit and wolf metabolism 2%; each degree hotter increases rabbit thirst 4%. Food growth decreases 2.5% per degree away from 20 C, floored at 10%. These are experiment assumptions, not validated animal physiology.
+- Drought: regular 60-second events at the selected frequency per simulation hour. Partial coverage uses a seeded center; full coverage preserves the original global drought. Strength is relative to the scenario: 100% keeps its drought regrowth and withering, 0% removes the growth reduction and withering, and 200% stops regrowth and doubles withering. Intermediate strengths interpolate between these values. Food-regrowth and temperature multipliers apply afterward. Automatic droughts are disabled at zero frequency; manual drought uses the same strength and area.
+- Predators: starting count is divided among configured wolf groups (0 to 20), overriding their starting counts. Speed scales the scenario baseline; vision is in tiles. Population may subsequently change through births, deaths, and scenario immigration.
+- Inheritance: mutation probability applies separately to each trait. Starting diversity rescales founder traits around 0.5, with the existing 0.05 to 0.95 bounds. Model weights stay fixed.
+
+The Field Guide's original equations describe the baseline. Experiment parameters override those baseline rules.
