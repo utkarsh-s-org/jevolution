@@ -124,10 +124,13 @@
     "arena:build": "node scripts/build-arena.mjs",
     "arena:deploy:build": "node scripts/ci-arena.mjs",
     "arena": "node dist/arena-server/server/src/evolution/cli.js",
-    "arena:check": "node --import tsx --test core/src/evolution/mechanics.test.ts server/src/evolution/modular.test.ts core/src/evolution/wolves.test.ts core/src/evolution/mapEditor.test.ts core/src/evolution/predatorPrey.test.ts core/src/evolution/experiments.test.ts server/src/evolution/hosted.test.ts",
+    "arena:check": "node --import tsx --test core/src/evolution/mechanics.test.ts server/src/evolution/modular.test.ts core/src/evolution/wolves.test.ts core/src/evolution/mapEditor.test.ts core/src/evolution/predatorPrey.test.ts core/src/evolution/experiments.test.ts server/src/evolution/hosted.test.ts core/src/evolution/mechanisms.test.ts server/src/evolution/mechanismPrompts.test.ts",
     "arena:ui": "node scripts/verify-arena-ui.mjs",
     "arena:dev:api": "node --import tsx scripts/dev-arena-byok.ts",
-    "arena:dev": "cd webview-ui && vite --config vite.arena.config.ts"
+    "arena:dev": "cd webview-ui && vite --config vite.arena.config.ts",
+    "arena:report": "tsx scripts/report-arena-runs.ts",
+    "arena:batch": "tsx scripts/batch-arena.ts",
+    "arena:review": "node dist/arena-server/server/src/evolution/reviewCli.js"
   },
   "devDependencies": {
     "@asyncapi/modelina": "^5.10.1",

@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import decision from '../../../api/arena/decision.js';
 import session from '../../../api/arena/session.js';
 import { DEFAULT_GROUPS } from '../../../core/src/evolution/constants.js';
+import { defaultExperimentPreview } from '../../../core/src/evolution/experimentPreview.js';
+import { BASELINE_EXPERIMENTS } from '../../../core/src/evolution/experiments.js';
 import { observe } from '../../../core/src/evolution/simulation.js';
 import { createWorld } from '../../../core/src/evolution/world.js';
 const url = 'https://jevolution.world/api/arena/decision';
@@ -64,4 +66,33 @@ test('BYOK rejects missing keys even with project credentials, isolates simultan
     if (prior === undefined) delete process.env.TYPESAFE_API_KEY;
     else process.env.TYPESAFE_API_KEY = prior;
   }
+});
+
+test('BYOK forwards both mechanism instructions and environmental settings without exposing credentials', async (t) => {
+  const world = createWorld(123);
+  const experiment = defaultExperimentPreview();
+  experiment.values.temperature = 40;
+  const observation = { ...observe(world, world.rabbits[0]), experiment: experiment.values };
+  const experiments = { ...BASELINE_EXPERIMENTS, demographics: true, communication: false };
+  const mock = t.mock.method(
+    globalThis,
+    'fetch',
+    async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer visitor-fixture');
+      assert.deepEqual(body.state.experiment, experiment.values);
+      assert.match(body.questions.action.instructions, /never happens alone/);
+      assert.match(body.questions.action.instructions, /Communication is disabled/);
+      assert.match(body.questions.action.instructions, /active experiment settings/);
+      assert.deepEqual(Object.keys(body.questions.signal.criteria), ['none']);
+      assert.ok(!String(init?.body).includes('visitor-fixture'));
+      return Response.json({ answers: { action: { choice: 'rest' }, signal: { choice: 'none' } } });
+    },
+  );
+  const response = await decision.fetch(
+    request({ group: DEFAULT_GROUPS[0], observation, options: { experiments } }, 'visitor-fixture'),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(mock.mock.calls.length, 1);
+  assert.ok(!(await response.text()).includes('visitor-fixture'));
 });

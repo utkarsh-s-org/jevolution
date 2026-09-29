@@ -21,9 +21,16 @@ import { ARENA_CONTROL_COLOR, ARENA_GROUP_COLORS } from '../constants.js';
 import { DecisionPanel } from './DecisionPanel.js';
 import { ExperimentControls } from './ExperimentControls.js';
 import { FieldGuide } from './FieldGuide.js';
-import { InheritedTraits, LatencyPanel, PopulationOutcomes } from './GroupPanels.js';
+import {
+  ExperimentPanel,
+  InheritedTraits,
+  LatencyPanel,
+  MechanismPanel,
+  PopulationOutcomes,
+} from './GroupPanels.js';
 import { arenaRequest, HOSTED, hostedClient } from './hostedClient.js';
 import { MapEditor } from './MapEditor.js';
+import { MechanismControls } from './MechanismControls.js';
 import { ModelSettings } from './ModelSettings.js';
 import { OrganismInspector } from './OrganismInspector.js';
 import { PopulationChart } from './PopulationChart.js';
@@ -184,7 +191,8 @@ export default function App() {
     return world && group ? groupPopulation(world, group) : 0;
   };
   const total = world?.rabbits.length || 0;
-  const missingKeys = liveStatus && Object.values(liveStatus.ready).some((ready) => !ready);
+  const missingKeys =
+    liveStatus && !liveStatus.readOnly && Object.values(liveStatus.ready).some((ready) => !ready);
   const generation = Math.max(0, ...(world?.rabbits.map((r) => r.generation) || []));
   const droughtSeconds = world ? Math.max(0, Math.ceil(world.droughtUntil - world.time)) : 0;
   const populationSummary = (
@@ -260,7 +268,13 @@ export default function App() {
       <div className="habitat-tools">
         <div className="habitat-state">
           <span className={`connection-dot ${status?.running ? 'connected' : ''}`} />
-          {replay.reviewing ? 'REPLAY' : liveStatus?.running ? 'LIVE' : 'PAUSED'}
+          {liveStatus?.readOnly
+            ? 'RECORDED RUN'
+            : replay.reviewing
+              ? 'REPLAY'
+              : liveStatus?.running
+                ? 'LIVE'
+                : 'PAUSED'}
         </div>
         <div className={`map-weather${droughtSeconds > 0 ? ' active' : ''}`}>
           <button
@@ -293,6 +307,7 @@ export default function App() {
           <button
             className="primary-button"
             disabled={
+              !!liveStatus?.readOnly ||
               editor.open ||
               busy ||
               !connected ||
@@ -310,7 +325,7 @@ export default function App() {
             className="icon-button"
             title="Run settings and reset"
             aria-label="Open run settings"
-            disabled={editor.open}
+            disabled={editor.open || !!liveStatus?.readOnly}
             onClick={() => {
               setConfig({ ...(liveStatus?.config || DEFAULT_CONFIG) });
               setSeed(snapshot?.world.seed || DEFAULT_SEED);
@@ -332,7 +347,12 @@ export default function App() {
                   : 'Edit map'
             }
             disabled={
-              busy || !connected || !!liveStatus?.running || replay.reviewing || editor.open
+              !!liveStatus?.readOnly ||
+              busy ||
+              !connected ||
+              !!liveStatus?.running ||
+              replay.reviewing ||
+              editor.open
             }
             onClick={() => {
               selectAnimal(null);
@@ -363,7 +383,12 @@ export default function App() {
         )}
         {!HOSTED && (
           <a className="export-link" href="/api/arena/export" download>
-            Export run ↓
+            Export snapshot ↓
+          </a>
+        )}
+        {!HOSTED && !liveStatus?.running && (
+          <a className="export-link" href="/api/arena/bundle" download>
+            Full experiment bundle ↓
           </a>
         )}
         {HOSTED && (
@@ -386,7 +411,7 @@ export default function App() {
                 .catch((error: Error) => setError(error.message));
             }}
           >
-            Export run ↓
+            Export snapshot ↓
           </button>
         )}
       </div>
@@ -693,10 +718,12 @@ export default function App() {
             />
             <div className="analytics-grid">
               <div className="analytics-column">
+                <ExperimentPanel snapshot={replay.shown} />
                 <PopulationOutcomes snapshot={replay.shown} />
                 <LatencyPanel snapshot={replay.shown} />
               </div>
               <div className="analytics-column">
+                <MechanismPanel snapshot={replay.shown} />
                 <InheritedTraits snapshot={replay.shown} />
               </div>
               <div className="analytics-column">
@@ -862,7 +889,10 @@ export default function App() {
                 onChange={(e) => {
                   const next = e.target.value as Scenario;
                   // Each scenario starts from its own defaults; the arena keeps its roster.
-                  setConfig({ ...SCENARIO_CONFIG[next] });
+                  setConfig({
+                    ...SCENARIO_CONFIG[next],
+                    experiments: config.experiments,
+                  });
                   setGroupsDraft(
                     next === 'predatorPrey'
                       ? PREDATOR_PREY_GROUPS
@@ -878,10 +908,10 @@ export default function App() {
             </label>
             {config.scenario === 'predatorPrey' ? (
               <p className="small-note">
-                Preset: 70 Jev rabbits and 8 Jev wolves. Rabbits breed on their own; wolves have
-                pups from kills and starve without them, so both populations rise and fall in
-                cycles. Like a real open habitat, a wolf and two rabbits join every 20 seconds
-                beside their own kind. Uses your TypeSafe key only.
+                Preset: 70 Jev rabbits and 8 Jev wolves. Uses your TypeSafe key only. The original
+                population-rate model includes solo births and continuous immigration. Active
+                mechanism experiments below override those assumptions. Population cycles are
+                outcomes, not guaranteed targets.
               </p>
             ) : (
               <ModelSettings
@@ -906,13 +936,6 @@ export default function App() {
                 ready={liveStatus?.providerReady}
               />
             )}
-            <ExperimentControls
-              value={config.experimentPreview}
-              scenario={config.scenario ?? 'arena'}
-              groups={groupsDraft}
-              disabled={!!liveStatus?.running || busy}
-              onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
-            />
             <div className="settings-grid">
               <div className="seed-setting">
                 <label htmlFor="habitat-seed">Habitat seed</label>
@@ -948,6 +971,7 @@ export default function App() {
                 Timing mode
                 <select
                   value={config.timing}
+                  disabled={config.experiments?.researchClock}
                   onChange={(e) =>
                     setConfig({ ...config, timing: e.target.value as RunConfig['timing'] })
                   }
@@ -965,7 +989,14 @@ export default function App() {
                     min: 100,
                     max: 15000,
                   },
-                  { key: 'maxInFlight', label: 'Concurrent calls / lineage', min: 1, max: 8 },
+                  {
+                    key: 'maxInFlight',
+                    label: config.experiments?.researchClock
+                      ? 'Concurrent calls / entire round'
+                      : 'Concurrent calls / lineage',
+                    min: 1,
+                    max: 8,
+                  },
                   {
                     key: 'equalizedMs',
                     label: 'Equalized response slot (ms)',
@@ -981,6 +1012,12 @@ export default function App() {
                   {item.label}
                   <input
                     type="number"
+                    disabled={
+                      config.experiments?.researchClock &&
+                      ['deadlineMs', 'decisionIntervalMs', 'equalizedMs', 'timeScale'].includes(
+                        item.key,
+                      )
+                    }
                     min={item.min}
                     max={item.max}
                     value={config[item.key] ?? 1}
@@ -993,6 +1030,18 @@ export default function App() {
               Same observation rules, physical speeds, request concurrency, and action schema.
               Rabbit colors are display labels only. No model outcome is predetermined.
             </p>
+            <ExperimentControls
+              value={config.experimentPreview}
+              scenario={config.scenario ?? 'arena'}
+              groups={groupsDraft}
+              disabled={!!liveStatus?.running || busy}
+              onChange={(experimentPreview) => setConfig({ ...config, experimentPreview })}
+            />
+            <MechanismControls
+              value={config.experiments}
+              disabled={busy}
+              onChange={(experiments) => setConfig({ ...config, experiments })}
+            />
           </div>
           <footer className="settings-footer">
             <button className="secondary-button" onClick={() => setShowSettings(false)}>

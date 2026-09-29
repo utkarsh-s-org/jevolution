@@ -18,6 +18,7 @@ import {
   defaultExperimentPreview,
   validateExperimentPreview,
 } from '../../../core/src/evolution/experimentPreview.js';
+import { BASELINE_EXPERIMENTS } from '../../../core/src/evolution/experiments.js';
 import { applyDecision, observe, stepWorld } from '../../../core/src/evolution/simulation.js';
 import type { ModelGroup, Provider, Snapshot } from '../../../core/src/evolution/types.js';
 import { createWorld } from '../../../core/src/evolution/world.js';
@@ -504,6 +505,40 @@ test('active settings set wolf counts and persist effective metadata in replay',
     settings.values.wolfCount = 0;
     runtime.reset(123, { ...DEFAULT_CONFIG, experimentPreview: settings });
     assert.equal(runtime.world.wolves.length, 0);
+  } finally {
+    runtime.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('reset preserves environmental controls and mechanism switches together in the world and replay', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'arena-combined-'));
+  const runtime = new ArenaRuntime(directory);
+  try {
+    const experimentPreview = defaultExperimentPreview('predatorPrey');
+    experimentPreview.values.wolfCount = 12;
+    experimentPreview.values.temperature = 40;
+    const experiments = {
+      ...BASELINE_EXPERIMENTS,
+      resources: true,
+      demographics: true,
+      researchClock: true,
+    };
+    runtime.reset(123, { ...SCENARIO_CONFIG.predatorPrey, experimentPreview, experiments });
+    assert.equal(runtime.world.wolves.length, 12);
+    assert.ok(runtime.world.rabbits.every((rabbit) => rabbit.life));
+    assert.ok(runtime.world.wolves.every((wolf) => wolf.life && wolf.water === 80));
+    const rules = rulesFor(runtime.world);
+    assert.equal(rules.wolfMealEnergy, 0);
+    assert.equal(rules.migrationInterval, 0);
+    assert.ok(rules.thirst > rulesFor({ scenario: 'predatorPrey', experiments }).thirst);
+    const recorded = runtime.replay.get(0);
+    for (const snapshot of [runtime.snapshot(), recorded]) {
+      assert.deepEqual(snapshot.world.experiment, experimentPreview);
+      assert.deepEqual(snapshot.world.experiments, experiments);
+      assert.deepEqual(snapshot.status.config.experimentPreview, experimentPreview);
+      assert.deepEqual(snapshot.status.config.experiments, experiments);
+    }
   } finally {
     runtime.dispose();
     rmSync(directory, { recursive: true, force: true });

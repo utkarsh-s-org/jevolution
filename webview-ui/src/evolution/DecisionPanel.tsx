@@ -30,6 +30,7 @@ export function DecisionPanel({
   onClose: () => void;
 }) {
   const [responseView, setResponseView] = useState<'native' | 'action'>('native');
+  const research = !!snapshot?.status.config.experiments?.researchClock;
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
     const element = panel.current;
@@ -111,7 +112,9 @@ export function DecisionPanel({
               {latest
                 ? latest.state === 'error' && latest.nativeResponse
                   ? 'Rejected · invalid provider decision'
-                  : labels[latest.state]
+                  : latest.state === 'returned' && research
+                    ? 'Response received · waiting for round commit'
+                    : labels[latest.state]
                 : 'No recorded response yet'}
             </span>
             {!waiting && response && (
@@ -182,10 +185,17 @@ export function DecisionPanel({
                   <p className="decision-action">{response.action}</p>
                 </details>
               )}
-              {(response.delayMs > 0 || response.timing === 'equalized') && (
+              {research && (
+                <p className="small-note">
+                  Biological time waited for the whole decision round. Responses were committed in
+                  stable order.
+                </p>
+              )}
+              {(response.delayMs > 0 || (!research && response.timing === 'equalized')) && (
                 <p className="small-note">
                   {response.delayMs > 0 && `${response.delayMs} ms added delay. `}
-                  {response.timing === 'equalized' &&
+                  {!research &&
+                    response.timing === 'equalized' &&
                     `${response.deadlineMs} ms equal timing window. `}
                   API round trip excludes these holds.
                 </p>

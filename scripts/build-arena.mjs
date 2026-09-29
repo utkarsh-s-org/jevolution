@@ -12,4 +12,5 @@ for (const [command, args, cwd] of [
   const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status || 1);
 }
+await import('./arena-provenance.mjs');
 console.log('[Evolution Arena] Build complete. Run npm run arena.');

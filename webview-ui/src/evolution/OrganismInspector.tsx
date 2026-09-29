@@ -1,5 +1,28 @@
-import { GENE_NAMES, RULES, TRAIT_INFO } from '../../../core/src/evolution/constants.js';
-import type { Snapshot } from '../../../core/src/evolution/types.js';
+import { GENE_NAMES, rulesFor, TRAIT_INFO } from '../../../core/src/evolution/constants.js';
+import { LIFE } from '../../../core/src/evolution/experiments.js';
+import type { Rabbit, Snapshot, Wolf } from '../../../core/src/evolution/types.js';
+
+function Development({ animal, time }: { animal: Rabbit | Wolf; time: number }) {
+  if (!animal.life) return null;
+  const rule = LIFE['genes' in animal ? 'rabbit' : 'wolf'];
+  const stage =
+    (animal.age ?? 0) < rule.dependent
+      ? 'dependent young'
+      : (animal.age ?? 0) < rule.maturity
+        ? 'juvenile'
+        : 'adult';
+  return (
+    <p className="small-note">
+      {animal.life.sex} · {stage}
+      {animal.life.pregnancy && (
+        <>
+          {' '}
+          · Birth due in {Math.max(0, animal.life.pregnancy.due - time).toFixed(1)} world seconds
+        </>
+      )}
+    </p>
+  );
+}
 
 export function OrganismInspector({
   snapshot,
@@ -13,6 +36,7 @@ export function OrganismInspector({
   onSelect: (id: number | null) => void;
 }) {
   const world = snapshot?.world;
+  const RULES = rulesFor(world);
   const groups = world?.groups || [];
   const groupName = (id: string) => groups.find((g) => g.id === id)?.label || id;
   const rabbit = world?.rabbits.find((r) => r.id === selected);
@@ -21,6 +45,7 @@ export function OrganismInspector({
   if (compact && rabbit)
     return (
       <div className="compact-animal">
+        <Development animal={rabbit} time={world!.time} />
         <div className="vital">
           <span>Energy</span>
           <div>
@@ -111,6 +136,7 @@ export function OrganismInspector({
             {rabbit.parents.length ? `Parents #${rabbit.parents.join(' + #')}` : 'Founder'} · Last
             call {rabbit.lastLatency === null ? 'N/A' : `${Math.round(rabbit.lastLatency)} ms`}
           </p>
+          <Development animal={rabbit} time={world!.time} />
           <p
             className="small-note"
             title="Accepted decisions with an available follow action; choosing another action is not necessarily uncooperative."
@@ -146,8 +172,23 @@ export function OrganismInspector({
           </div>
           <div className="compact-row">
             <span>Hunting</span>
-            <b>{wolf.cooldown > 0 ? `Eating · ${Math.ceil(wolf.cooldown)}s` : 'Ready to hunt'}</b>
+            <b>
+              {world?.experiments?.resources
+                ? (wolf.nextAttack ?? 0) > world.time
+                  ? `Recovery · ${((wolf.nextAttack ?? 0) - world.time).toFixed(1)}s`
+                  : 'Attack recovery complete'
+                : wolf.cooldown > 0
+                  ? `Eating · ${Math.ceil(wolf.cooldown)}s`
+                  : 'Ready to hunt'}
+            </b>
           </div>
+          <Development animal={wolf} time={world!.time} />
+          {world?.experiments?.resources && (
+            <div className="compact-row">
+              <span>Water</span>
+              <b>{(wolf.water ?? 0).toFixed(1)} / 100</b>
+            </div>
+          )}
           {wolfGroup?.wolfLifeCycle === 'dynamic' ? (
             <>
               <div className="compact-row">
@@ -175,9 +216,11 @@ export function OrganismInspector({
               </div>
               {!compact && (
                 <p className="small-note">
-                  Births need two same-group wolves to choose each other and meet nearby. Both need{' '}
-                  {RULES.wolfBreedEnergy} energy and age {RULES.wolfMaturity}s; each pays{' '}
-                  {RULES.wolfBreedCost} energy. Hunger and old age cause death.
+                  {world?.experiments?.demographics
+                    ? `Paired conception, 24s gestation and 12s dependent pups. Maturity: 45s. Sex: ${wolf.life?.sex ?? 'unknown'}. ${wolf.life?.pregnancy ? `Pregnant until ${wolf.life.pregnancy.due.toFixed(1)}s.` : ''}`
+                    : RULES.wolfSoloPups
+                      ? 'Baseline population model: a fed mature wolf has pups alone. This is not individual reproductive biology.'
+                      : `Two eligible same-group wolves choose each other and meet. Maturity ${RULES.wolfMaturity}s; energy threshold ${RULES.wolfBreedEnergy}.`}
                 </p>
               )}
             </>

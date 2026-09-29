@@ -1,3 +1,4 @@
+import { validateExperiments } from '../../core/src/evolution/experiments.js';
 import { PROVIDER_KEYS } from '../../core/src/evolution/constants.js';
 import type { ModelGroup, ModelObservation } from '../../core/src/evolution/types.js';
 import { json, sameOrigin } from '../../server/src/evolution/hostedAuth.js';
@@ -57,6 +58,7 @@ export default {
           apiKey,
           relief: body.options?.relief !== false,
           predatorPrey: body.options?.predatorPrey === true,
+          experiments: validateExperiments(body.options?.experiments),
         },
       );
       return json(result);

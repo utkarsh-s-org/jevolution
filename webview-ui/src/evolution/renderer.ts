@@ -372,6 +372,22 @@ export function attachRenderer(
               ),
           });
       }
+      for (const carcass of world.carcasses || [])
+        draws.push({
+          y: carcass.y * T,
+          draw: () => {
+            rect(ctx, C.cacheWood, carcass.x * T - 6, carcass.y * T - 3, 12, 6);
+            rect(ctx, C.ink, carcass.x * T - 4, carcass.y * T - 1, 8, 2);
+            rect(
+              ctx,
+              C.cargo,
+              carcass.x * T - 6,
+              carcass.y * T + 5,
+              12 * Math.min(1, carcass.energy / 65),
+              2,
+            );
+          },
+        });
       for (const cache of world.caches || [])
         draws.push({
           y: cache.y * T + 6,

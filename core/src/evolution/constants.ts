@@ -267,9 +267,35 @@ export const PREDATOR_PREY_RULES: Rules = {
   migrationInterval: 20,
 };
 export function rulesFor(
-  world: (Pick<World, 'scenario'> & Partial<Pick<World, 'experiment'>>) | undefined,
+  world: (Pick<World, 'scenario'> & Partial<Pick<World, 'experiment' | 'experiments'>>) | undefined,
 ): Rules {
-  const base = world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
+  let base = world?.scenario === 'predatorPrey' ? PREDATOR_PREY_RULES : RULES;
+  if (world?.experiments?.resources)
+    base = {
+      ...base,
+      wolfMovementCost: 0.18,
+      foodRegrowth: base.foodRegrowth * 0.5,
+      droughtRegrowth: 0.001,
+      droughtWither: 0.08,
+      wolfMealEnergy: 0,
+    };
+  if (world?.experiments?.demographics)
+    base = {
+      ...base,
+      rabbitSoloBirths: 0,
+      wolfSoloPups: 0,
+      maturity: 24,
+      wolfMaturity: 45,
+      lifespan: 480,
+      wolfLifespan: 720,
+      breedEnergy: 60,
+      preyMateDistance: 1.7,
+      wolfPairDistance: 1.7,
+      rabbitCapacity: 0,
+      localCapacity: 12,
+      localCrowdRadius: 4,
+      migrationInterval: 0,
+    };
   const e = world?.experiment;
   if (!e?.appliedToSimulation || e.mode !== 'active') return base;
   const v = e.values;
